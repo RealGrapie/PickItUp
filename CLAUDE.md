@@ -172,6 +172,8 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 # has no SDK). Write the commands into a script in watch/ with
 # `export PATH=/root/.local/bin:$PATH` and run: MSYS_NO_PATHCONV=1 wsl -d Ubuntu-24.04 -u root -- bash _b.sh
 pebble build                                  # -> build/watch.pbw, copy to ../pickitup.pbw
+# CI (.github/workflows/watchapp.yml): uv tool install pebble-tool==5.0.40 --python 3.13, then
+# `pebble sdk install 4.33.1 < /dev/null` - verified from an empty HOME in WSL; bump both together
 DEMO=1 pebble build                           # emulator demo: sample code "12345678*9012", no auto-exit
 pebble install --emulator flint               # some platforms need SELECT x2 to open the app
 pebble screenshot --emulator flint --no-open x.png

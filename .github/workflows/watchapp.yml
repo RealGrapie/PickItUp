@@ -1,0 +1,29 @@
+# Builds the watchapp for all 7 Pebble platforms on every push and pull request.
+# The Pebble SDK isn't on GitHub's runners: pebble-tool comes from PyPI via uv, then it downloads
+# SDK 4.33.1 with its ARM toolchain (same versions as the author's WSL setup).
+name: Watchapp
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: watch
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Pebble SDK
+        run: |
+          uv tool install pebble-tool==5.0.40 --python 3.13
+          pebble sdk install 4.33.1 < /dev/null
+      - name: Build
+        run: pebble build < /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pickitup-pbw
+          path: watch/build/watch.pbw
+          retention-days: 14
