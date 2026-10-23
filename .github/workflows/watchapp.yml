@@ -15,7 +15,7 @@ jobs:
         working-directory: watch
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.2  # setup-uv publishes no moving major tag ("v10" fails)
         with:
           enable-cache: false  # nothing to cache: no requirements files, one tool install
       - name: Pebble SDK
