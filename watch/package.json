@@ -1,0 +1,56 @@
+{
+  "name": "pickitup",
+  "author": "Grapie",
+  "version": "1.0.0",
+  "keywords": [
+    "pebble-app"
+  ],
+  "private": true,
+  "dependencies": {},
+  "pebble": {
+    "displayName": "PickItUp!",
+    "uuid": "553a866c-3355-471c-8239-a8dd9c2925a1",
+    "sdkVersion": "3",
+    "enableMultiJS": false,
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery",
+      "flint",
+      "gabbro"
+    ],
+    "watchapp": {
+      "watchface": false
+    },
+    "messageKeys": {
+      "Code": 10000,
+      "Visible": 10001,
+      "Updated": 10002,
+      "Request": 10003,
+      "Status": 10004,
+      "Timeout": 10005
+    },
+    "companionApp": {
+      "android": {
+        "url": "https://github.com/RealGrapie/PickItUp/releases/latest",
+        "apps": [
+          {
+            "package": "com.grapie.pickitup"
+          }
+        ]
+      }
+    },
+    "resources": {
+      "media": [
+        {
+          "type": "bitmap",
+          "name": "IMAGE_MENU_ICON",
+          "file": "images/menu_icon.png",
+          "menuIcon": true
+        }
+      ]
+    }
+  }
+}

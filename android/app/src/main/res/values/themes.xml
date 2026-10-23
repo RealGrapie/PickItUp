@@ -1,0 +1,12 @@
+<resources>
+    <style name="Theme.PickItUp" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
+        <!-- System splash: the launcher glyph on Ozon blue; SplashOverlay continues from it. -->
+        <item name="android:windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+    </style>
+
+    <style name="Theme.PickItUp.Page">
+        <item name="android:windowBackground">@color/page_background</item>
+    </style>
+</resources>

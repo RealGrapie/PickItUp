@@ -1,0 +1,5 @@
+# LF in the repo (gradlew and the Pebble wscript run on Linux); Windows scripts keep CRLF.
+* text=auto eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.png binary

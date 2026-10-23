@@ -1,0 +1,31 @@
+# Captures contain live Ozon session tokens
+*.har
+
+# Builds and release files (attach APK/PBW to GitHub releases instead)
+*.apk
+*.pbw
+android/build/
+android/app/build/
+android/.gradle/
+android/.kotlin/
+watch/build/
+watch/.lock-waf_*
+watch/_*.sh
+
+# Machine-specific
+local.properties
+# Release signing: the key and its passwords live outside git (backup in KeePassXC)
+keystore.properties
+*.jks
+*.keystore
+.idea/
+*.iml
+.claude/settings.local.json
+CLAUDE.local.md
+
+# Local only: pre-redesign backup, the temporary Ozon Lab / Splash Lab experiments and the notes
+# on Ozon's internal API from them
+backup/
+ozonlab/
+splashlab/
+research/

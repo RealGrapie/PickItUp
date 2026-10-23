@@ -1,0 +1,31 @@
+# Builds the companion and runs its unit tests on every push and pull request.
+# The APK is debug-key signed (the release key never leaves the author's PC) and is kept
+# as a build artifact for 14 days; real releases are attached to GitHub Releases by hand.
+name: Android
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: chmod +x gradlew && ./gradlew testDebugUnitTest
+      - name: Release APK
+        run: ./gradlew assembleRelease
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pickitup-apk
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 14
