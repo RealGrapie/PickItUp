@@ -9,20 +9,22 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # same Ubuntu as the WSL the SDK install was checked on
     defaults:
       run:
         working-directory: watch
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: false  # nothing to cache: no requirements files, one tool install
       - name: Pebble SDK
         run: |
           uv tool install pebble-tool==5.0.40 --python 3.13
           pebble sdk install 4.33.1 < /dev/null
       - name: Build
         run: pebble build < /dev/null
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pickitup-pbw
           path: watch/build/watch.pbw
