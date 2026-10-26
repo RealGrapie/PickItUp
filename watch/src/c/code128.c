@@ -33,7 +33,7 @@ static int digit_run(const char *s) {
   return n;
 }
 
-int code128_encode(const char *text, uint8_t *out, int *total_modules) {
+int code128_encode(const char *text, int c_pairs, uint8_t *out, int *total_modules) {
   int len = strlen(text);
   if (len == 0 || len > CODE128_MAX_CHARS) return 0;
   for (int i = 0; i < len; i++) {
@@ -43,14 +43,16 @@ int code128_encode(const char *text, uint8_t *out, int *total_modules) {
   uint8_t values[CODE128_MAX_CHARS * 2 + 3];
   int nv = 0;
   // Set C is worth it for runs of 4+ digits (or a code made only of 2+ digits).
-  bool set_c = digit_run(text) >= 4 || (digit_run(text) == len && len >= 2 && len % 2 == 0);
+  // Entering set C costs a symbol, so it needs at least 2 pairs of budget to save anything.
+  bool set_c = c_pairs >= 2 && (digit_run(text) >= 4 || (digit_run(text) == len && len >= 2 && len % 2 == 0));
   values[nv++] = set_c ? START_C : START_B;
 
   for (int i = 0; i < len;) {
     if (set_c) {
-      if (digit_run(text + i) >= 2) {
+      if (digit_run(text + i) >= 2 && c_pairs > 0) {
         values[nv++] = (text[i] - '0') * 10 + (text[i + 1] - '0');
         i += 2;
+        c_pairs--;
         continue;
       }
       values[nv++] = CODE_B;
@@ -58,7 +60,7 @@ int code128_encode(const char *text, uint8_t *out, int *total_modules) {
     }
     int run = digit_run(text + i);
     // Switch to C only for an even-length tail of the run, so no digit is left over.
-    if (run >= 4 && run % 2 == 0) {
+    if (c_pairs >= 2 && run >= 4 && run % 2 == 0) {
       values[nv++] = CODE_C;
       set_c = true;
       continue;

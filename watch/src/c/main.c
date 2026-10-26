@@ -51,9 +51,10 @@ static ViewMode s_mode;
 static int s_timeout_s = DEFAULT_TIMEOUT_S;
 static AppTimer *s_exit_timer;
 
-static uint8_t s_widths[CODE128_MAX_WIDTHS];
+static uint8_t s_widths[CODE128_MAX_WIDTHS];  // dense (sets B + C)
 static int s_nwidths;
 static int s_modules;
+static uint8_t s_wide[CODE128_MAX_WIDTHS];    // scratch for a longer encoding (see draw_bars)
 static QrCode s_qr;        // the pickup code (test view)
 static QrCode s_setup_qr;  // COMPANION_URL
 
@@ -64,7 +65,7 @@ static AppTimer *s_fetch_timer;  // armed while the phone says "Updating..."
 static bool s_show_setup;  // setup screen opened with long SELECT
 
 static void encode(void) {
-  s_nwidths = code128_encode(s_code, s_widths, &s_modules);
+  s_nwidths = code128_encode(s_code, CODE128_DENSE, s_widths, &s_modules);
   qr_encode(s_code, QR_EC_M, &s_qr);
 }
 
@@ -90,15 +91,54 @@ static void draw_text(GContext *ctx, const char *text, const char *font, GRect b
                      GTextOverflowModeWordWrap, GTextAlignmentCenter, NULL);
 }
 
+__attribute__((unused)) static int isqrt(int v) {
+  int r = 0;
+  while ((r + 1) * (r + 1) <= v) r++;
+  return r;
+}
+
+// Room for the code along its direction. Round screens: the chord at the band edge farthest from
+// the centre, so the code and its quiet zones stay inside the circle on every bar line.
+static int bars_length(GRect area, bool vertical, GRect screen) {
+  int length = vertical ? area.size.h : area.size.w;
+#ifdef PBL_ROUND
+  int r = screen.size.w / 2;
+  int from = vertical ? area.origin.x : area.origin.y;
+  int to = from + (vertical ? area.size.w : area.size.h);
+  int d = from - r < 0 ? r - from : from - r;
+  if (to - r > d) d = to - r;
+  if (r - to > d) d = r - to;
+  int chord = d < r ? 2 * isqrt(r * r - d * d) : 0;
+  if (chord < length) length = chord;
+#endif
+  return length;
+}
+
 // Modules are always a whole number of pixels: tested with zxing on 303 Ozon-like codes,
 // 1.2-1.4 px/module (what stretching to 200px would give) decodes 0%, 1 and 2+ px 100%.
-static void draw_bars(GContext *ctx, GRect area, bool vertical) {
+// 2px needs ~300px, more than any Pebble has, so the code is made longer instead (as Member Card
+// does): the fewest digit pairs in set C whose code still fits, i.e. as wide as the room allows.
+// Time 2 and Round 2 get a wider code; 144px screens and Time Round keep the dense one.
+static void draw_bars(GContext *ctx, GRect area, bool vertical, GRect screen) {
+  int room = bars_length(area, vertical, screen) - 2 * MARGIN;
+  const uint8_t *widths = s_widths;
+  int n = s_nwidths, modules = s_modules;
+  if (s_modules < room) {
+    for (int pairs = 0; pairs <= CODE128_MAX_CHARS / 2; pairs++) {
+      int m = 0;
+      int nw = code128_encode(s_code, pairs, s_wide, &m);
+      if (nw && m <= room) {
+        if (m > modules) { widths = s_wide; n = nw; modules = m; }
+        break;
+      }
+    }
+  }
   int length = vertical ? area.size.h : area.size.w;
-  int scale = (length - 2 * MARGIN) / s_modules;
+  int scale = room / modules;
   if (scale < 1) scale = 1;
-  int pos = (length - s_modules * scale) / 2;
-  for (int i = 0; i < s_nwidths; i++) {
-    int w = s_widths[i] * scale;
+  int pos = (length - modules * scale) / 2;
+  for (int i = 0; i < n; i++) {
+    int w = widths[i] * scale;
     if (i % 2 == 0) {
       GRect bar = vertical
           ? GRect(area.origin.x, area.origin.y + pos, area.size.w, w)
@@ -355,7 +395,7 @@ static void draw_rotated(GContext *ctx, GRect b) {
   graphics_context_set_fill_color(ctx, header_bg());
   graphics_fill_rect(ctx, rotate_rect(l.header, b), 0, GCornerNone);
   graphics_context_set_fill_color(ctx, GColorBlack);
-  draw_bars(ctx, rotate_rect(l.content, b), true);
+  draw_bars(ctx, rotate_rect(l.content, b), true, b);
 
   GBitmap *fb = graphics_capture_frame_buffer(ctx);
   for (int i = 0; i < 3; i++) {
@@ -381,7 +421,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     return;
   }
 
-  // The module width stays 1px everywhere: 2px would need 268px for a typical 134-module code.
+  // The module width stays 1px everywhere: 2px would need ~300px for a typical code.
   bool big = b.size.w >= 200;
   Layout l = layout_for(b);
   draw_frame_texts(ctx, &l, big);
@@ -392,7 +432,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     draw_qr(ctx, &s_qr, l.content, 1);  // as big as the band allows: 4px modules on 144x168
 #endif
   } else {
-    draw_bars(ctx, l.content, false);
+    draw_bars(ctx, l.content, false, b);
   }
 }
 

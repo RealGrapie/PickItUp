@@ -143,8 +143,12 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 ## Hard-won rules
 
 - Barcode modules must be a **whole number of pixels**. Tested with zxing on 303 Ozon-like codes:
-  1.2–1.4 px/module decodes 0%, 1 px and 2+ px 100%. The watch uses 1 px/module on both screens;
-  do not stretch the code to the screen width (the user asked once; it was rejected for this).
+  1.2–1.4 px/module decodes 0%, 1 px and 2+ px 100%. 2 px needs ~300 px: no Pebble has that,
+  so modules stay 1 px everywhere. To fill wide screens the code is made *longer* instead (as
+  the "Member Card" app does): `code128_encode(text, c_pairs, ...)` caps the digit pairs in set C;
+  `draw_bars` picks the fewest pairs whose code fits (round: the chord at the band edge). Time 2 and
+  Round 2 get the wider code (both views), 144 px screens and Time Round the dense one. All
+  budgets 0..12 + dense decode on 157 codes with zxing.
 - PebbleKit2 `DefaultPebbleSender.close()` throws "Service not registered" when no Pebble app is
   installed (the bind never happened) and crashed the app on every send: always `closeQuietly`.
 - Login state = a real account id (`isLoggedIn()`, cached in `BarcodeStore.loggedIn`), never "some
