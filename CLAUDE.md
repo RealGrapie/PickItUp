@@ -24,6 +24,7 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   Strings.kt            all UI texts, RU + EN;  AppSettings.kt  language, theme, flags
   BarcodeStore.kt       saved code, settings, journal;  Code128.kt  same encoder as the watch
   RefreshSchedule.kt    interval / daily refresh math;  RefreshJobService.kt  background job
+  Updater.kt            update check (GitHub Releases API) + APK download -> system installer
 ```
 
 ## Identity
@@ -44,6 +45,10 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   `res/mipmap-anydpi/ic_launcher.xml` = background `@color/ic_launcher_background` (#005BFF) +
   vector `drawable/ic_launcher_foreground.xml`, also used as the `monochrome` layer (Material You
   themed icons), so its cut-outs must stay transparent (even-odd path), not filled with blue.
+- README logo: `docs/logo.svg` = the launcher icon (same paths on #005BFF). README images:
+  `docs/screenshots/watch.png` (emulator shots in the Pebble appstore frames
+  `apps.repebble.com/images/screenshot_slider_background_{original,pebble2,time,time_round,emery_v2,gabbro}.png`),
+  `phone-*.png` (emulator shots in the SDK skin `skins/pixel_9_pro_xl`, demo mode + SystemUI demo mode).
 - Watch menu icon (variant 6 "bold barcode"): `watch/resources/images/menu_icon.png`, 25x25,
   black on transparent so the launcher can invert it on the selected row.
 - These two icons are final (phone D, watch 6). There is no separate logo.
@@ -123,6 +128,17 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 - **Terminology** (user's rule): the app on the watch is the **"watchapp"** in both languages
   ("Закрывать watchapp…", "…даже если watchapp не открывали", logs "⌚ watchapp запросил…").
   "Pebble" / "часы" stay only where the device itself is meant ("Получено часами").
+
+- **Updates** (`Updater.kt`): `releases/latest` of the public repo over plain HttpURLConnection
+  (no WebView: no Chromium), every 12 h from `MainActivity.onStart` and by "Check for updates"
+  in settings. A newer tag (`v1.2` vs `versionName`, numeric compare) shows `UpdateCard` (main
+  screen, onboarding, settings); "Update" downloads the first `.apk` asset to `cache/update/`,
+  checks package name + higher versionCode, opens it via FileProvider (`${applicationId}.files`)
+  in the system installer (REQUEST_INSTALL_PACKAGES; Android asks once to allow PickItUp!).
+  So every release needs: a `vX.Y` tag, an attached `pickitup.apk` signed with the release key,
+  and a bumped `versionCode` / `versionName` (+ `watch/package.json` `version`). The release
+  body is shown as "what's new" (6 lines): write it as short unwrapped lines.
+  Tested on the emulator: 1.0 -> found v1.1 -> downloaded -> installer -> 1.1 installed.
 
 ## Hard-won rules
 
@@ -242,11 +258,8 @@ contain session tokens too; the original research captures were removed once the
 
 ## Open items
 
-- Update mechanism (discussed, not built): the companion checks GitHub Releases (banner +
-  download + system installer, REQUEST_INSTALL_PACKAGES; Obtainium works for free); the watchapp
-  sends its version with each request so the companion can say "watchapp outdated"; Pebble App
-  Store for automatic watch updates. Bump `versionCode`/`versionName` and `watch/package.json`
-  `version` together.
+- Watchapp updates (not built): the watchapp could send its version with each request so the
+  companion can say "watchapp outdated"; Pebble App Store for automatic watch updates.
 - Never verified in real life: scanning the watch barcode at an Ozon pickup point; the
   "Phone not connected" screen on a real watch; how long the Ozon web session lives.
 - Ideas, not done: launch the watchapp from the phone (QS tile / shortcut), teens barcode

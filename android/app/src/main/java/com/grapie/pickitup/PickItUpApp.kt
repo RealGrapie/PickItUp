@@ -8,6 +8,7 @@ class PickItUpApp : Application() {
         AppSettings.init(this)
         BarcodeStore.init(this)
         Watches.init(this)
+        Updater.init(this)
         RefreshJobService.schedule(this)
     }
 }

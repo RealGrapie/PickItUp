@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="18 18 72 72" width="160" height="160">
+  <!-- The launcher icon (res/drawable/ic_launcher_foreground.xml on #005BFF) as a README logo -->
+  <rect x="18" y="18" width="72" height="72" rx="18" fill="#005BFF"/>
+  <path fill="#FFF" d="M32,40.2 L40,31 H68 L76,40.2 Z"/>
+  <path fill="#FFF" fill-rule="evenodd" d="M32,41.8 H76 V73 Q76,76 73,76 H35 Q32,76 32,73 Z M41,50 H67 Q69,50 69,52 V67 Q69,69 67,69 H41 Q39,69 39,67 V52 Q39,50 41,50 Z"/>
+  <path fill="#FFF" d="M43,53h3v13h-3z M47,53h2v13h-2z M50,53h4v13h-4z M55,53h2v13h-2z M59,53h3v13h-3z M63,53h2v13h-2z"/>
+</svg>

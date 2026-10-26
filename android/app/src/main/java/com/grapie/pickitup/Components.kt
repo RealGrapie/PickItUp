@@ -26,7 +26,10 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -171,6 +174,35 @@ fun BarcodeView(code: String, modifier: Modifier = Modifier, shape: Shape = Roun
             val px = (w * scale).toFloat()
             if (i % 2 == 0) drawRect(Color.Black, Offset(x, top), Size(px, barHeight))
             x += px
+        }
+    }
+}
+
+/** "Version X is available" with the release notes and an update button; nothing when up to date. */
+@Composable
+fun UpdateCard(modifier: Modifier = Modifier) {
+    val s = LocalStrings.current
+    val release by Updater.available.collectAsStateWithLifecycle()
+    val progress by Updater.progress.collectAsStateWithLifecycle()
+    val failed by Updater.failed.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val r = release ?: return
+    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = modifier.fillMaxWidth()) {
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            val on = MaterialTheme.colorScheme.onPrimaryContainer
+            Text(s.updateAvailable(r.version), style = MaterialTheme.typography.titleMedium, color = on)
+            if (r.notes.isNotEmpty()) {
+                Text(r.notes, style = MaterialTheme.typography.bodyMedium, color = on, maxLines = 6, overflow = TextOverflow.Ellipsis)
+            }
+            if (failed) Text(s.updateFailed, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+            Spacer(Modifier.height(4.dp))
+            val p = progress
+            if (p != null) {
+                Text(s.updateDownloading, style = MaterialTheme.typography.labelLarge, color = on)
+                LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().clip(CircleShape))
+            } else {
+                PillButton(s.updateAction, R.drawable.ic_download, { Updater.install(context) })
+            }
         }
     }
 }

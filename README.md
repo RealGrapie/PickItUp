@@ -1,15 +1,23 @@
-# PickItUp!
+<p align="center">
+  <img src="docs/logo.svg" width="128" height="128" alt="PickItUp! logo">
+</p>
 
-Ozon order-pickup barcode on your Pebble. Show the watch at the pickup point instead of
-reaching for the phone.
+<h1 align="center">PickItUp!</h1>
 
-Штрихкод для получения заказов Ozon на часах Pebble: в пункте выдачи достаточно показать часы.
+<p align="center">
+  Ozon order-pickup barcode on your Pebble. Show the watch at the pickup point instead of
+  reaching for the phone.<br>
+  Штрихкод для получения заказов Ozon на часах Pebble: в пункте выдачи достаточно показать часы.
+</p>
 
-![The watchapp on Pebble 2 Duo (barcode, QR, rotated), Pebble Time, Time Round, Time 2 and Round 2](docs/screenshots/watch.png)
+<p align="center">
+  <img src="docs/screenshots/watch.png" alt="The watchapp on Pebble 2 Duo, Pebble Time (QR view), Time Round, Time 2 (rotated view), Round 2 and the original Pebble">
+</p>
 
-<p>
-  <img src="docs/screenshots/phone-main.png" width="300" alt="Companion: main screen">
-  <img src="docs/screenshots/phone-settings.png" width="300" alt="Companion: settings">
+<p align="center">
+  <img src="docs/screenshots/phone-main.png" width="280" alt="Companion: main screen">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/phone-settings.png" width="280" alt="Companion: settings">
 </p>
 
 ## How it works
@@ -27,7 +35,8 @@ or "outdated").
 
 The companion is a Material 3 app (light / dark / Material You colours, Russian and English):
 it shows the same barcode on the phone, which watch is connected and whether it got the code,
-and has a demo mode for screenshots.
+and has a demo mode for screenshots. It checks GitHub Releases for new versions by itself and
+installs an update in two taps (Android asks once to allow installs from PickItUp!).
 
 ## Install
 

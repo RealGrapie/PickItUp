@@ -79,6 +79,7 @@ class MainActivity : BaseActivity() {
     override fun onStart() {
         super.onStart()
         Watches.watch(this)
+        Updater.checkIfDue()
     }
 
     override fun onStop() {
@@ -186,6 +187,7 @@ class MainActivity : BaseActivity() {
                     PillButton(s.login, R.drawable.ic_login, ::login, Modifier.widthIn(min = 220.dp))
                 }
                 Spacer(Modifier.weight(1.3f))
+                UpdateCard(Modifier.padding(bottom = 16.dp))
             }
         }
     }
@@ -250,6 +252,7 @@ class MainActivity : BaseActivity() {
                     BarcodeCard(barcode, busy, onEnlarge = { fullscreen = true })
 
                     AnimatedVisibility(loginNeeded && barcode != null) { SessionCard() }
+                    UpdateCard()
 
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
                         Column(Modifier.padding(vertical = 4.dp)) {

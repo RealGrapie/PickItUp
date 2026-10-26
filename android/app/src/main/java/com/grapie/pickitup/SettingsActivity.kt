@@ -155,7 +155,18 @@ class SettingsActivity : BaseActivity() {
 
             SectionCard(s.sectionAbout, R.drawable.ic_info) {
                 NavRow(R.drawable.ic_info, APP_NAME, s.version(appVersion())) { showAbout = true }
+                val update by Updater.state.collectAsStateWithLifecycle()
+                NavRow(
+                    R.drawable.ic_refresh, s.checkUpdates,
+                    when (update) {
+                        Updater.State.CHECKING -> s.updateChecking
+                        Updater.State.UP_TO_DATE -> s.updateUpToDate
+                        Updater.State.ERROR -> s.updateCheckError
+                        Updater.State.IDLE -> null
+                    },
+                ) { Updater.check() }
             }
+            UpdateCard()
         }
 
         if (showAbout) AboutSheet { showAbout = false }
