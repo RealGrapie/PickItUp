@@ -26,6 +26,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
@@ -178,7 +180,21 @@ fun BarcodeView(code: String, modifier: Modifier = Modifier, shape: Shape = Roun
     }
 }
 
-/** "Version X is available" with the release notes and an update button; nothing when up to date. */
+/**
+ * Release notes in the app's language: the GitHub release body has each point in Russian and in
+ * English, so keep the lines with (RU) or without (EN) Cyrillic, minus the "What's new" heading.
+ * Anything that would come out empty is shown as is.
+ */
+fun localizedNotes(notes: String, russian: Boolean): List<String> {
+    val cyrillic = Regex("[\u0400-\u04FF]")
+    val lines = notes.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        .filterNot { it.endsWith(":") && "What's new" in it }
+    val picked = lines.filter { cyrillic.containsMatchIn(it) == russian }
+    return picked.ifEmpty { lines }
+}
+
+/** "Version X is available": a teaser line, "What's new" (a bottom sheet) and "Update". */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun UpdateCard(modifier: Modifier = Modifier) {
     val s = LocalStrings.current
@@ -186,13 +202,15 @@ fun UpdateCard(modifier: Modifier = Modifier) {
     val progress by Updater.progress.collectAsStateWithLifecycle()
     val failed by Updater.failed.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var showNotes by remember { mutableStateOf(false) }
     val r = release ?: return
+    val notes = localizedNotes(r.notes, s === Strings.RU)
     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val on = MaterialTheme.colorScheme.onPrimaryContainer
             Text(s.updateAvailable(r.version), style = MaterialTheme.typography.titleMedium, color = on)
-            if (r.notes.isNotEmpty()) {
-                Text(r.notes, style = MaterialTheme.typography.bodyMedium, color = on, maxLines = 6, overflow = TextOverflow.Ellipsis)
+            notes.firstOrNull()?.let {
+                Text(it.removePrefix("- "), style = MaterialTheme.typography.bodyMedium, color = on, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (failed) Text(s.updateFailed, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(4.dp))
@@ -201,7 +219,29 @@ fun UpdateCard(modifier: Modifier = Modifier) {
                 Text(s.updateDownloading, style = MaterialTheme.typography.labelLarge, color = on)
                 LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().clip(CircleShape))
             } else {
-                PillButton(s.updateAction, R.drawable.ic_download, { Updater.install(context) })
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (notes.isNotEmpty()) PillButton(s.whatsNew, null, { showNotes = true }, Modifier.weight(1f), tonal = true)
+                    PillButton(s.updateAction, R.drawable.ic_download, { Updater.install(context) }, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+    if (showNotes) {
+        // Same style as "About": opens fully, closes with a swipe down, a scrim tap or back.
+        ModalBottomSheet(onDismissRequest = { showNotes = false }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(
+                Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(s.whatsNewIn(r.version), style = MaterialTheme.typography.headlineSmall)
+                notes.forEach { line ->
+                    Row {
+                        Text("•", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(20.dp))
+                        Text(line.removePrefix("- ").removePrefix("• "), style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                PillButton(s.updateAction, R.drawable.ic_download, { showNotes = false; Updater.install(context) }, Modifier.fillMaxWidth())
             }
         }
     }
