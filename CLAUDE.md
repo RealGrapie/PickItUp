@@ -82,7 +82,11 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   Test with `adb shell cmd jobscheduler run -f com.grapie.pickitup 1001`.
 - AppMessage keys: `Code`, `Visible`, `Updated`, `Request`, `Status`, `Timeout` — defined in both
   `watch/package.json` and `WatchKeys`; keep in sync. Status strings `Log in on phone`,
-  `Updating...`, `Update failed` are shared between BarcodeSync and main.c.
+  `Updating...`, `Update failed` are shared between BarcodeSync and main.c. An empty `Code` (sent
+  while logged out, e.g. right after logout) makes the watch delete its stored code. After
+  "Updating..." the watch waits 90 s for the result, then shows "No answer from phone".
+- LoginActivity also closes itself when `__Secure-access-token` changes while the account id
+  cookie stayed (a session Ozon ended on its side keeps the id: re-login must still close it).
 - **Watch screens without a stored code**: "Phone not connected" / "Checking phone..." / after 5 s
   of silence a QR to the companion (= companion not installed) / "Log in to Ozon" / "Getting
   barcode..." / "No barcode yet". With a stored code the barcode is always shown, also offline.

@@ -137,6 +137,9 @@ object BarcodeSync {
                 put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
                 put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))
                 put(WatchKeys.UPDATED, PebbleDictionaryItem.Int32((b.fetchedAt / 1000).toInt()))
+            } else if (!BarcodeStore.loggedIn.value) {
+                // Logged out: an empty code makes the watch forget the one it stored.
+                put(WatchKeys.CODE, PebbleDictionaryItem.Text(""))
             }
             put(WatchKeys.STATUS, PebbleDictionaryItem.Text(status))
             put(WatchKeys.TIMEOUT, PebbleDictionaryItem.Int32(BarcodeStore.exitTimeout.value))

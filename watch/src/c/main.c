@@ -36,6 +36,8 @@
 #define STATUS_NO_ANSWER "No answer from phone"
 // The companion answers a request at once; silence this long means it isn't installed.
 #define PHONE_ANSWER_TIMEOUT_MS 5000
+// After "Updating..." the result follows within the companion's 60 s fetch timeout.
+#define PHONE_FETCH_TIMEOUT_MS 90000
 
 static Window *s_window;
 static Layer *s_canvas;
@@ -58,6 +60,7 @@ static QrCode s_setup_qr;  // COMPANION_URL
 typedef enum { PHONE_WAITING, PHONE_ANSWERED, PHONE_SILENT } PhoneState;
 static PhoneState s_phone = PHONE_WAITING;
 static AppTimer *s_answer_timer;
+static AppTimer *s_fetch_timer;  // armed while the phone says "Updating..."
 static bool s_show_setup;  // setup screen opened with long SELECT
 
 static void encode(void) {
@@ -407,6 +410,13 @@ static void answer_timeout(void *data) {
   }
 }
 
+// The phone said "Updating..." and then went silent (killed, lost the watch): don't hang.
+static void fetch_timeout(void *data) {
+  s_fetch_timer = NULL;
+  clear_updating(connection_service_peek_pebble_app_connection() ? STATUS_NO_ANSWER : STATUS_OFFLINE);
+  layer_mark_dirty(s_canvas);
+}
+
 static void request_from_phone(int kind) {
   s_phone = PHONE_WAITING;
   if (s_answer_timer) app_timer_cancel(s_answer_timer);
@@ -442,7 +452,16 @@ static void restart_exit_timer(void) {
 static void inbox_received(DictionaryIterator *it, void *context) {
   Tuple *t;
   s_phone = PHONE_ANSWERED;
-  if ((t = dict_find(it, MESSAGE_KEY_Code)) && t->type == TUPLE_CSTRING) {
+  if ((t = dict_find(it, MESSAGE_KEY_Code)) && t->type == TUPLE_CSTRING && t->length <= 1) {
+    // Empty code = logged out on the phone: forget the stored one, back to the setup screens.
+    s_code[0] = s_visible[0] = '\0';
+    s_nwidths = 0;
+    s_updated = 0;
+    persist_delete(PERSIST_CODE);
+    persist_delete(PERSIST_VISIBLE);
+    persist_delete(PERSIST_UPDATED);
+    restart_exit_timer();
+  } else if (t && t->type == TUPLE_CSTRING) {
     bool first = !s_nwidths;
     strncpy(s_code, t->value->cstring, sizeof(s_code) - 1);
     s_code[sizeof(s_code) - 1] = '\0';
@@ -462,6 +481,9 @@ static void inbox_received(DictionaryIterator *it, void *context) {
   if ((t = dict_find(it, MESSAGE_KEY_Status)) && t->type == TUPLE_CSTRING) {
     strncpy(s_status, t->value->cstring, sizeof(s_status) - 1);
     s_status[sizeof(s_status) - 1] = '\0';
+    if (s_fetch_timer) app_timer_cancel(s_fetch_timer);
+    s_fetch_timer = strcmp(s_status, STATUS_UPDATING) == 0
+        ? app_timer_register(PHONE_FETCH_TIMEOUT_MS, fetch_timeout, NULL) : NULL;
   }
   if ((t = dict_find(it, MESSAGE_KEY_Timeout))) {
     int timeout = t->value->int32;

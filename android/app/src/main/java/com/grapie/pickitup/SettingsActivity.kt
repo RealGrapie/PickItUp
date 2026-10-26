@@ -190,6 +190,8 @@ class SettingsActivity : BaseActivity() {
                         BarcodeStore.clear()
                         BarcodeStore.loginNeeded.value = true
                         BarcodeStore.log(s.logLoggedOut)
+                        // If the watchapp is open it forgets the code now, else on its next request.
+                        BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                         onBack()
                     }) { Text(s.logoutConfirm, color = MaterialTheme.colorScheme.error) }
                 },

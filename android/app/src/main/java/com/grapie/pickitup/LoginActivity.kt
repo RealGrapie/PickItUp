@@ -129,8 +129,10 @@ class LoginActivity : ComponentActivity() {
 
     // Login mode closes itself once Ozon's cookies switch from guest to a real account
     // (__Secure-user-id != 0). Only on that transition, so opening it while already logged in
-    // doesn't bounce straight back.
+    // doesn't bounce straight back. A session Ozon ended on its side may keep the account id
+    // cookie: then a new access token is the transition.
     private var wasGuest = false
+    private var startToken: String? = null
     private val loginWatcher = object : Runnable {
         override fun run() {
             checkLoggedIn()
@@ -145,7 +147,8 @@ class LoginActivity : ComponentActivity() {
     }
 
     private fun checkLoggedIn() {
-        if (finishing || !wasGuest || !OzonClient.isLoggedIn()) return
+        if (finishing || !OzonClient.isLoggedIn()) return
+        if (!wasGuest && OzonClient.accessToken() == startToken) return
         finishing = true
         CookieManager.getInstance().flush()
         // Now, not in onDestroy: that runs only after the main screen has resumed.
@@ -218,6 +221,7 @@ class LoginActivity : ComponentActivity() {
         }
         if (loginMode) {
             wasGuest = !OzonClient.isLoggedIn()
+            startToken = OzonClient.accessToken()
             handler.postDelayed(loginWatcher, 1000)
         }
         onBackPressedDispatcher.addCallback(this, webBack)

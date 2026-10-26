@@ -140,16 +140,19 @@ object OzonClient {
         return FetchResult.Ok(Barcode(code, bc.optString("visibleCode", code), System.currentTimeMillis()))
     }
 
-    private fun userIdCookie(): String? =
+    private fun cookie(name: String): String? =
         CookieManager.getInstance().getCookie("https://www.ozon.ru")
             ?.split(';')?.map { it.trim() }
-            ?.firstOrNull { it.startsWith("__Secure-user-id=") }?.substringAfter('=')
+            ?.firstOrNull { it.startsWith("$name=") }?.substringAfter('=')
 
     /** Ozon sets `__Secure-user-id` to the account id after login (0 for guests). */
     fun isLoggedIn(): Boolean {
-        val id = userIdCookie()
+        val id = cookie("__Secure-user-id")
         return !id.isNullOrEmpty() && id != "0"
     }
+
+    /** Changes on every new login (and token refresh): tells a fresh session from a dead one. */
+    fun accessToken(): String? = cookie("__Secure-access-token")
 
     fun logout() {
         CookieManager.getInstance().removeAllCookies(null)
