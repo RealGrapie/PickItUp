@@ -78,9 +78,9 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   binds `WatchListenerService` (works with the companion closed) -> `BarcodeSync.onWatchRequest`
   answers at once (always, even without a code) and re-fetches if the saved code is stale.
 - **Refresh schedule** (`RefreshSchedule.kt`, settings section "Штрихкод"), two mutually exclusive
-  modes (`BarcodeStore.refreshMode`): INTERVAL — every 1 / 3 / **6 (default)** / 12 / 24 h
-  (`refreshHours`; a stored value not in this list falls back to 6); DAILY — every day at a time
-  chosen with a Material `TimePicker` dialog, 24 h, default 08:00 (`dailyMinutes`). Stale =
+  modes (`BarcodeStore.refreshMode`): INTERVAL — every 1 / 3 / 6 / 12 / 24 h (`refreshHours`,
+  6 if unset or not in this list); DAILY (**default**) — every day at a time chosen with a
+  Material `TimePicker` dialog, 24 h, default 06:00 (`dailyMinutes`). Stale =
   older than the interval / fetched before the last passed daily time (`RefreshSchedule.isStale`).
 - **Background refresh**: `RefreshJobService` (JobScheduler, job id 1001, network required,
   persisted): INTERVAL = periodic job; DAILY = one-shot job at the next daily time (extra
@@ -114,7 +114,7 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   there; BACK elsewhere exits the app), UP forces a refresh, DOWN only resets the
   auto-exit timer. View mode persists. The backlight is left to the system (user's choice).
 - **Auto-exit**: the watchapp closes after N s without button presses (`Timeout`, 0 = never,
-  default 60, persisted on the watch); N is chosen in companion settings and sent with every reply.
+  default 120 = 2 min on both sides, persisted on the watch); N is chosen in companion settings and sent with every reply.
   Off on setup/QR screens.
 - **Companion UI**: main screen = barcode card (tap = full screen at max brightness), status card
   with "Обновлён <today/yesterday, HH:MM>" and the watch row (model name + `WatchStatus` text +

@@ -80,6 +80,11 @@ class MainActivity : BaseActivity() {
         super.onStart()
         Watches.watch(this)
         Updater.checkIfDue()
+        // Cold start: find out whether the watchapp is open (sending the stored code, no Ozon
+        // request) instead of "Nothing sent yet". Not during a fetch: that would clear the
+        // watch's "Updating...".
+        if (BarcodeStore.watchStatus.value == WatchStatus.UNKNOWN && !BarcodeStore.busy.value)
+            BarcodeSync.sendToWatchAsync(this)
     }
 
     override fun onStop() {

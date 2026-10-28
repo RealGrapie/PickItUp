@@ -20,7 +20,7 @@
 #define PERSIST_MODE 5
 #define PERSIST_TIMEOUT 6
 
-#define DEFAULT_TIMEOUT_S 60  // until the phone sends the user's choice; 0 = never
+#define DEFAULT_TIMEOUT_S 120  // until the phone sends the user's choice; 0 = never
 
 #define REQUEST_CACHED 1   // send what you have, refresh if stale
 #define REQUEST_REFRESH 2  // re-fetch from Ozon now

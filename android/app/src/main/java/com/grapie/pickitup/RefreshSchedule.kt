@@ -8,7 +8,7 @@ enum class RefreshMode { INTERVAL, DAILY }
 object RefreshSchedule {
     val INTERVAL_OPTIONS = listOf(1, 3, 6, 12, 24)
     const val DEFAULT_INTERVAL_HOURS = 6
-    const val DEFAULT_DAILY_MINUTES = 8 * 60  // 08:00
+    const val DEFAULT_DAILY_MINUTES = 6 * 60  // 06:00
 
     fun formatTime(minutesOfDay: Int) = "%02d:%02d".format(minutesOfDay / 60, minutesOfDay % 60)
 

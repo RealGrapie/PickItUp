@@ -189,7 +189,7 @@ class Strings(
             backgroundLabel = "Обновлять в фоне, даже если watchapp не открывали",
             modeInterval = "Каждые",
             modeDaily = "Каждый день в",
-            refreshHint = "Когда открывают watchapp, устаревший код обновляется сразу.",
+            refreshHint = "Если открывается watchapp, устаревший код обновляется сразу.",
             pickTime = "Время обновления",
             ok = "OK",
             before = { "до $it" },

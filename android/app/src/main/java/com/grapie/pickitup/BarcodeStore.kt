@@ -28,9 +28,9 @@ object BarcodeStore {
     val loggedIn = MutableStateFlow(false)
     val watchStatus = MutableStateFlow(WatchStatus.UNKNOWN)
     /** Seconds without button presses before the watchapp closes itself; 0 = never. */
-    val exitTimeout = MutableStateFlow(60)
+    val exitTimeout = MutableStateFlow(120)
     /** Refresh every [refreshHours] or daily at [dailyMinutes] (see [RefreshSchedule]). */
-    val refreshMode = MutableStateFlow(RefreshMode.INTERVAL)
+    val refreshMode = MutableStateFlow(RefreshMode.DAILY)
     val refreshHours = MutableStateFlow(RefreshSchedule.DEFAULT_INTERVAL_HOURS)
     val dailyMinutes = MutableStateFlow(RefreshSchedule.DEFAULT_DAILY_MINUTES)
     /** Also refresh on that schedule in the background ([RefreshJobService]). */
@@ -40,9 +40,9 @@ object BarcodeStore {
     fun init(context: Context) {
         prefs = context.getSharedPreferences("barcode", Context.MODE_PRIVATE)
         val code = prefs.getString("code", null)
-        exitTimeout.value = prefs.getInt("exitTimeout", 60)
+        exitTimeout.value = prefs.getInt("exitTimeout", 120)
         refreshMode.value = runCatching { RefreshMode.valueOf(prefs.getString("refreshMode", null)!!) }
-            .getOrDefault(RefreshMode.INTERVAL)
+            .getOrDefault(RefreshMode.DAILY)
         // Old builds offered 20 h / 2 days; anything not offered any more falls back to the default.
         refreshHours.value = prefs.getInt("refreshHours", RefreshSchedule.DEFAULT_INTERVAL_HOURS)
             .takeIf { it in RefreshSchedule.INTERVAL_OPTIONS } ?: RefreshSchedule.DEFAULT_INTERVAL_HOURS

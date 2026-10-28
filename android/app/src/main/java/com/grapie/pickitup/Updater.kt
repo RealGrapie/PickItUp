@@ -50,6 +50,10 @@ object Updater {
         // Gone once that version (or a later one) is installed.
         available.value = if (v != null && isNewer(v, installed))
             Release(v, prefs.getString("apkUrl", "")!!, prefs.getString("notes", "")!!) else null
+        // The downloaded APK is never reused (install() downloads again): once nothing newer is
+        // pending it is installed or stale. Kept while an update is pending, the installer may
+        // still be reading it. The WebView cache stays: Chromium caps it (~20 MB) and reuses it.
+        if (available.value == null) File(context.cacheDir, "update").deleteRecursively()
     }
 
     /** "v1.10" > "1.9": numeric parts, missing ones count as 0. */
