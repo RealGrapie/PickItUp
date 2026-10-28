@@ -16,9 +16,9 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/phone-main.png" width="280" alt="Приложение: главный экран">
+  <img src="docs/screenshots/phone-main-ru.png" width="280" alt="Приложение: главный экран">
   &nbsp;&nbsp;
-  <img src="docs/screenshots/phone-settings.png" width="280" alt="Приложение: настройки">
+  <img src="docs/screenshots/phone-settings-ru.png" width="280" alt="Приложение: настройки">
 </p>
 
 > [!NOTE]

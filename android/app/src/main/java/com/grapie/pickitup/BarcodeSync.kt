@@ -156,6 +156,8 @@ object BarcodeSync {
         }
         val r = res?.values?.firstOrNull()
         BarcodeStore.watchStatus.value = when {
+            // Demo mode on a phone without the Pebble app (the emulator): screenshots show a delivery.
+            res == null && BarcodeStore.demo.value -> WatchStatus.RECEIVED
             res == null -> WatchStatus.NO_PEBBLE_APP
             res.isEmpty() -> WatchStatus.NOT_CONNECTED
             r == TransmissionResult.Success -> WatchStatus.RECEIVED

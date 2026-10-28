@@ -49,7 +49,7 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 - README logo: `docs/logo.svg` = the launcher icon (same paths on #005BFF). README images:
   `docs/screenshots/watch.png` (emulator shots in the Pebble appstore frames
   `apps.repebble.com/images/screenshot_slider_background_{original,pebble2,time,time_round,emery_v2,gabbro}.png`),
-  `phone-*.png` (emulator shots in the SDK skin `skins/pixel_9_pro_xl`, demo mode + SystemUI demo mode).
+  `phone-*.png` (EN for README.md, `-ru` for README.ru.md; emulator shots in the SDK skin `skins/pixel_9_pro_xl`, demo mode + SystemUI demo mode).
 - README is English (`README.md`, default) + Russian (`README.ru.md`), linked to each other at
   the top: keep both in sync. Install buttons `docs/badges/{github,pebble-appstore,rebble}-{en,ru}.svg`
   ("Get it on Google Play" style, text as paths) come from `docs/badges/badges.py`. GitHub button =
@@ -264,7 +264,8 @@ adb -s $PHONE install -r --user 0 app/build/outputs/apk/release/app-release.apk
   codenames to names ("flint" -> "Pebble 2 Duo"), remembers the last watch. Verified on the phone.
 - Demo mode (debug screen, `BarcodeStore.demo`, persisted): phone and watch show `shown` =
   "12345678*9012" / "1234 5678 * 9012" instead of the real code, refresh is fake (no Ozon call),
-  the orders button only shows a toast. The real code stays saved and comes back when it's off.
+  the orders button only shows a toast; without the Pebble app (emulator) the watch row reads
+  "Pebble 2 Duo, received". The real code stays saved and comes back when it's off.
 - Main screen row "Обновлён" / "Updated" (not "Получен"): today/yesterday + time, older = date + time (`Strings.receivedWhen`).
 
 ## Privacy

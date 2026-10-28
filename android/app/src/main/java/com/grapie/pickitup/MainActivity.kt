@@ -280,6 +280,7 @@ class MainActivity : BaseActivity() {
                             val title = when {
                                 connected.size > 1 -> connected.joinToString(" + ") { it.model }
                                 watch != null -> watch.model
+                                BarcodeStore.demo.value -> "Pebble 2 Duo"
                                 else -> "Pebble"
                             }
                             val otherApp = watchStatus == WatchStatus.OTHER_APP_OPEN
