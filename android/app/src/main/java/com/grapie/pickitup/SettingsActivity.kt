@@ -164,7 +164,9 @@ class SettingsActivity : BaseActivity() {
                         Updater.State.ERROR -> s.updateCheckError
                         Updater.State.IDLE -> null
                     },
-                ) { Updater.check() }
+                ) { Updater.check(manual = true) }
+                val autoCheck by Updater.autoCheck.collectAsStateWithLifecycle()
+                SwitchRow(s.autoCheckLabel, s.autoCheckHint, autoCheck, Updater::setAutoCheck)
             }
             UpdateCard()
         }

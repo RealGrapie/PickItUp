@@ -66,6 +66,7 @@ class MainActivity : BaseActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val coldStart = savedInstanceState == null
+        if (coldStart) Updater.checkOnLaunch()
         setScreen {
             MainScreen(onSettings = { startActivity(Intent(this, SettingsActivity::class.java)) })
             var splash by rememberSaveable { mutableStateOf(coldStart) }
@@ -79,7 +80,6 @@ class MainActivity : BaseActivity() {
     override fun onStart() {
         super.onStart()
         Watches.watch(this)
-        Updater.checkIfDue()
         // Cold start: find out whether the watchapp is open (sending the stored code, no Ozon
         // request) instead of "Nothing sent yet". Not during a fetch: that would clear the
         // watch's "Updating...".
@@ -192,7 +192,7 @@ class MainActivity : BaseActivity() {
                     PillButton(s.login, R.drawable.ic_login, ::login, Modifier.widthIn(min = 220.dp))
                 }
                 Spacer(Modifier.weight(1.3f))
-                UpdateCard(Modifier.padding(bottom = 16.dp))
+                UpdateCard(Modifier.padding(bottom = 16.dp), skippable = true)
             }
         }
     }
@@ -257,7 +257,7 @@ class MainActivity : BaseActivity() {
                     BarcodeCard(barcode, busy, onEnlarge = { fullscreen = true })
 
                     AnimatedVisibility(loginNeeded && barcode != null) { SessionCard() }
-                    UpdateCard()
+                    UpdateCard(skippable = true)
 
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
                         Column(Modifier.padding(vertical = 4.dp)) {

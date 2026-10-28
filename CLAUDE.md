@@ -135,14 +135,17 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   "Pebble" / "часы" stay only where the device itself is meant ("Получено часами").
 
 - **Updates** (`Updater.kt`): `releases/latest` of the public repo over plain HttpURLConnection
-  (no WebView: no Chromium), every 12 h from `MainActivity.onStart` and by "Check for updates"
-  in settings. A newer tag (`v1.2` vs `versionName`, numeric compare) shows `UpdateCard` (main
+  (no WebView: no Chromium), on every launch (`MainActivity.onCreate` without saved state; settings switch "check
+  automatically", default on) and by "Check for updates" in settings. The card's close button
+  skips that version on the main screen (settings always show it; a manual check un-skips). A newer tag (`v1.2` vs `versionName`, numeric compare) shows `UpdateCard` (main
   screen, onboarding, settings); "Update" downloads the first `.apk` asset to `cache/update/`,
   checks package name + higher versionCode, opens it via FileProvider (`${applicationId}.files`)
   in the system installer (REQUEST_INSTALL_PACKAGES; Android asks once to allow PickItUp!).
   So every release needs: a `vX.Y` tag, an attached `pickitup.apk` signed with the release key,
-  and a bumped `versionCode` / `versionName` (+ `watch/package.json` `version`). The release
-  body is shown as "what's new" (6 lines): write it as short unwrapped lines.
+  and a bumped `versionCode` / `versionName` (+ `watch/package.json` `version`). Release body
+  format (`localizedNotes`, tested in `ReleaseNotesTest`): a `## English` section, then
+  `## Русский` (English first), each = one plain highlight line (the update card shows it) + short unwrapped `- `
+  points (the "What's new" sheet). Lines are split by Cyrillic; headings and `**` are dropped.
   Tested on the emulator: 1.0 -> found v1.1 -> downloaded -> installer -> 1.1 installed.
 
 ## Hard-won rules

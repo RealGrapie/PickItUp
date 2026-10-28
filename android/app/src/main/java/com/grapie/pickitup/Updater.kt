@@ -20,14 +20,13 @@ import java.net.URL
 data class Release(val version: String, val apkUrl: String, val notes: String)
 
 /**
- * Updates from GitHub Releases: [check] reads the latest release (at most every [CHECK_EVERY_MS]
- * by itself), [install] downloads its APK and hands it to the system installer. Plain HTTP, no
+ * Updates from GitHub Releases: [check] reads the latest release (by itself once per app launch,
+ * see [checkOnLaunch]), [install] downloads its APK and hands it to the system installer. Plain HTTP, no
  * WebView: this must not load Chromium. The system refuses an APK signed with another key.
  */
 object Updater {
     private const val TAG = "Updater"
     private const val API_URL = "https://api.github.com/repos/RealGrapie/PickItUp/releases/latest"
-    private const val CHECK_EVERY_MS = 12 * 3600_000L
 
     enum class State { IDLE, CHECKING, UP_TO_DATE, ERROR }
 
@@ -41,11 +40,17 @@ object Updater {
     /** Download progress 0..1 while the APK is downloading, else null. */
     val progress = MutableStateFlow<Float?>(null)
     val failed = MutableStateFlow(false)
+    /** A version hidden from the main screen with the card's close button. */
+    val skipped = MutableStateFlow<String?>(null)
+    /** Settings switch: check by itself on every app launch and show the card on the main screen. */
+    val autoCheck = MutableStateFlow(true)
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("update", Context.MODE_PRIVATE)
         installed = runCatching { context.packageManager.getPackageInfo(context.packageName, 0).versionName }
             .getOrNull() ?: "0"
+        skipped.value = prefs.getString("skipped", null)
+        autoCheck.value = prefs.getBoolean("autoCheck", true)
         val v = prefs.getString("version", null)
         // Gone once that version (or a later one) is installed.
         available.value = if (v != null && isNewer(v, installed))
@@ -68,19 +73,33 @@ object Updater {
         return false
     }
 
-    /** From the main screen: a check now and then, quietly. */
-    fun checkIfDue() {
-        if (System.currentTimeMillis() - prefs.getLong("checkedAt", 0) < CHECK_EVERY_MS) return
-        check()
+    /** From the main screen when it opens anew (not on every return to it): one small GitHub request. */
+    fun checkOnLaunch() {
+        if (autoCheck.value) check()
     }
 
-    fun check() {
+    fun skip(version: String) {
+        prefs.edit().putString("skipped", version).apply()
+        skipped.value = version
+    }
+
+    fun setAutoCheck(on: Boolean) {
+        prefs.edit().putBoolean("autoCheck", on).apply()
+        autoCheck.value = on
+        if (on) check()
+    }
+
+    /** [manual]: "Check for updates" in settings brings a skipped version back. */
+    fun check(manual: Boolean = false) {
+        if (manual && skipped.value != null) {
+            prefs.edit().remove("skipped").apply()
+            skipped.value = null
+        }
         if (state.value == State.CHECKING) return
         state.value = State.CHECKING
         scope.launch {
             val r = runCatching { withContext(Dispatchers.IO) { fetchLatest() } }
                 .onFailure { Log.w(TAG, "check failed", it) }
-            prefs.edit().putLong("checkedAt", System.currentTimeMillis()).apply()
             val rel = r.getOrNull()
             state.value = when {
                 r.isFailure -> State.ERROR

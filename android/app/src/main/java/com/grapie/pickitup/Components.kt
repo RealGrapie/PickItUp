@@ -180,37 +180,57 @@ fun BarcodeView(code: String, modifier: Modifier = Modifier, shape: Shape = Roun
     }
 }
 
+/** A release body split for the update card: [highlight] for the card, [points] for "What's new". */
+data class ReleaseNotes(val highlight: String?, val points: List<String>)
+
 /**
- * Release notes in the app's language: the GitHub release body has each point in Russian and in
- * English, so keep the lines with (RU) or without (EN) Cyrillic, minus the "What's new" heading.
- * Anything that would come out empty is shown as is.
+ * Release notes in the app's language. The GitHub release body has a Russian and an English
+ * section ("## English", then "## Русский"), each a plain highlight line and "- " points, so keep
+ * the lines with (RU) or without (EN) Cyrillic, minus headings. Older releases had only points,
+ * RU and EN interleaved: then the card shows the first point. Empty results fall back to all lines.
  */
-fun localizedNotes(notes: String, russian: Boolean): List<String> {
+fun localizedNotes(notes: String, russian: Boolean): ReleaseNotes {
     val cyrillic = Regex("[\u0400-\u04FF]")
     val lines = notes.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        .filterNot { it.endsWith(":") && "What's new" in it }
-    val picked = lines.filter { cyrillic.containsMatchIn(it) == russian }
-    return picked.ifEmpty { lines }
+        .filterNot { it.startsWith("#") || (it.endsWith(":") && "What's new" in it) }
+    val picked = lines.filter { cyrillic.containsMatchIn(it) == russian }.ifEmpty { lines }
+    val bullet = Regex("^[-*•]\\s+")
+    val (points, plain) = picked.partition { bullet.containsMatchIn(it) }
+    fun clean(t: String) = t.replace(bullet, "").replace("**", "").replace("__", "").trim()
+    return ReleaseNotes(plain.firstOrNull()?.let(::clean), (points.ifEmpty { plain.drop(1) }).map(::clean))
 }
 
-/** "Version X is available": a teaser line, "What's new" (a bottom sheet) and "Update". */
+/**
+ * "Version X is available": a teaser line, "What's new" (a bottom sheet) and "Update".
+ * [skippable] (main screen): a close button skips this version, and the card follows the
+ * "check automatically" switch. Settings always show it.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UpdateCard(modifier: Modifier = Modifier) {
+fun UpdateCard(modifier: Modifier = Modifier, skippable: Boolean = false) {
     val s = LocalStrings.current
     val release by Updater.available.collectAsStateWithLifecycle()
     val progress by Updater.progress.collectAsStateWithLifecycle()
     val failed by Updater.failed.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val skipped by Updater.skipped.collectAsStateWithLifecycle()
+    val autoCheck by Updater.autoCheck.collectAsStateWithLifecycle()
     var showNotes by remember { mutableStateOf(false) }
     val r = release ?: return
+    if (skippable && (!autoCheck || r.version == skipped)) return
     val notes = localizedNotes(r.notes, s === Strings.RU)
+    val teaser = notes.highlight ?: notes.points.firstOrNull()
     Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.large, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val on = MaterialTheme.colorScheme.onPrimaryContainer
-            Text(s.updateAvailable(r.version), style = MaterialTheme.typography.titleMedium, color = on)
-            notes.firstOrNull()?.let {
-                Text(it.removePrefix("- "), style = MaterialTheme.typography.bodyMedium, color = on, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(s.updateAvailable(r.version), style = MaterialTheme.typography.titleMedium, color = on, modifier = Modifier.weight(1f))
+                if (skippable) IconButton({ Updater.skip(r.version) }, Modifier.size(32.dp)) {
+                    Icon(painterResource(R.drawable.ic_close), s.skipUpdate, tint = on)
+                }
+            }
+            teaser?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = on, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (failed) Text(s.updateFailed, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(4.dp))
@@ -220,7 +240,7 @@ fun UpdateCard(modifier: Modifier = Modifier) {
                 LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().clip(CircleShape))
             } else {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (notes.isNotEmpty()) PillButton(s.whatsNew, null, { showNotes = true }, Modifier.weight(1f), tonal = true)
+                    if (notes.points.isNotEmpty()) PillButton(s.whatsNew, null, { showNotes = true }, Modifier.weight(1f), tonal = true)
                     PillButton(s.updateAction, R.drawable.ic_download, { Updater.install(context) }, Modifier.weight(1f))
                 }
             }
@@ -234,10 +254,11 @@ fun UpdateCard(modifier: Modifier = Modifier) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Text(s.whatsNewIn(r.version), style = MaterialTheme.typography.headlineSmall)
-                notes.forEach { line ->
+                notes.highlight?.let { Text(it, style = MaterialTheme.typography.titleMedium) }
+                notes.points.forEach { line ->
                     Row {
                         Text("•", style = MaterialTheme.typography.bodyLarge, modifier = Modifier.width(20.dp))
-                        Text(line.removePrefix("- ").removePrefix("• "), style = MaterialTheme.typography.bodyLarge)
+                        Text(line, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
                 Spacer(Modifier.height(8.dp))
