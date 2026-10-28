@@ -1,3 +1,5 @@
+<p align="right"><b>English</b> | <a href="README.ru.md">Русский</a></p>
+
 <p align="center">
   <img src="docs/logo.svg" width="128" height="128" alt="PickItUp! logo">
 </p>
@@ -6,8 +8,7 @@
 
 <p align="center">
   Ozon order-pickup barcode on your Pebble. Show the watch at the pickup point instead of
-  reaching for the phone.<br>
-  Штрихкод для получения заказов Ozon на часах Pebble: в пункте выдачи достаточно показать часы.
+  reaching for the phone.
 </p>
 
 <p align="center">
@@ -19,6 +20,11 @@
   &nbsp;&nbsp;
   <img src="docs/screenshots/phone-settings.png" width="280" alt="Companion: settings">
 </p>
+
+> [!NOTE]
+> **Project status:** PickItUp! is maintained with AI (written mostly with Claude Code) and is at
+> an early stage: it started as a personal project. Expect active development and possible bugs.
+> See [Contributing](#contributing).
 
 ## How it works
 
@@ -33,8 +39,8 @@ Watch buttons: SELECT — barcode / QR / rotated barcode, hold SELECT — link t
 (BACK closes it), UP — refresh. The footer shows when the code was updated ("upd today 14:05",
 or "outdated").
 
-The companion is a Material 3 app (light / dark / Material You colours, Russian and English):
-it shows the same barcode on the phone, which watch is connected and whether it got the code,
+The companion is a Material 3 app with light and dark themes, Material You colours and a Russian
+or English interface. It shows the same barcode on the phone, which watch is connected and whether it got the code,
 and has a demo mode for screenshots. It checks GitHub Releases for new versions by itself and
 installs an update in two taps (Android asks once to allow installs from PickItUp!).
 
@@ -42,9 +48,18 @@ installs an update in two taps (Android asks once to allow installs from PickItU
 
 Requires Android 12+ and the Pebble app (Core Devices).
 
-1. Download `pickitup.apk` from [Releases](https://github.com/RealGrapie/PickItUp/releases/latest),
+1. Download `pickitup.apk` (the GitHub button below or [Releases](https://github.com/RealGrapie/PickItUp/releases/latest)),
    install it and log in to Ozon.
-2. Install `pickitup.pbw` from the same release on the watch via the Pebble app.
+2. Install the watchapp from the Pebble App Store or Rebble, or sideload `pickitup.pbw` from the
+   same release via the Pebble app.
+
+<p align="center">
+  <a href="https://github.com/RealGrapie/PickItUp/releases/latest/download/pickitup.apk"><img src="docs/badges/github-en.svg" height="48" alt="Get it on GitHub"></a>
+  &nbsp;
+  <a href="https://apps.repebble.com/a085bb50ce2e4a239f1a1870"><img src="docs/badges/pebble-appstore-en.svg" height="48" alt="Get it on Pebble App Store"></a>
+  &nbsp;
+  <a href="https://apps.rebble.io/en_US/application/6adfa2c6d0da320009a522f3"><img src="docs/badges/rebble-en.svg" height="48" alt="Get it on Rebble App Store"></a>
+</p>
 
 ## Build
 
@@ -70,6 +85,18 @@ PickItUp! is an unofficial app and is not affiliated with, endorsed by or connec
 "Ozon" is a trademark of its respective owner. The app uses the Ozon website the same way a
 browser does, on behalf of the logged-in user; your session stays on your phone.
 
+## Contributing
+
+PickItUp! is written mostly with AI (Claude Code) and developed through AI-assisted workflows.
+
+- Issues with bugs or feature ideas are welcome.
+- Pull requests are welcome too, but this is a personal project without formal contribution
+  guidelines, and changes may be declined to keep it aligned with its author's needs.
+- Code and architecture follow AI-friendly patterns: [CLAUDE.md](CLAUDE.md) holds the project
+  context, conventions and hard-won rules, so start there, with or without an AI assistant.
+
 ## License
 
 [MIT](LICENSE) © 2026 Grapie. Material icons: Apache License 2.0 (Google).
+Store badges use the Google Sans Flex and Roboto fonts (SIL OFL 1.1); the GitHub, Pebble App
+Store and Rebble logos belong to their owners.

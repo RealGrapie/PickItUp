@@ -49,6 +49,11 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   `docs/screenshots/watch.png` (emulator shots in the Pebble appstore frames
   `apps.repebble.com/images/screenshot_slider_background_{original,pebble2,time,time_round,emery_v2,gabbro}.png`),
   `phone-*.png` (emulator shots in the SDK skin `skins/pixel_9_pro_xl`, demo mode + SystemUI demo mode).
+- README is English (`README.md`, default) + Russian (`README.ru.md`), linked to each other at
+  the top: keep both in sync. Install buttons `docs/badges/{github,pebble-appstore,rebble}-{en,ru}.svg`
+  ("Get it on Google Play" style, text as paths) come from `docs/badges/badges.py`. GitHub button =
+  `releases/latest/download/pickitup.apk`; stores: apps.repebble.com/a085bb50ce2e4a239f1a1870,
+  apps.rebble.io/en_US/application/6adfa2c6d0da320009a522f3.
 - Watch menu icon (variant 6 "bold barcode"): `watch/resources/images/menu_icon.png`, 25x25,
   black on transparent so the launcher can invert it on the selected row.
 - These two icons are final (phone D, watch 6). There is no separate logo.
@@ -262,12 +267,9 @@ contain session tokens too; the original research captures were removed once the
 
 ## Open items
 
-- Watchapp updates (not built): the watchapp could send its version with each request so the
-  companion can say "watchapp outdated"; Pebble App Store for automatic watch updates.
-- Never verified in real life: scanning the watch barcode at an Ozon pickup point; the
-  "Phone not connected" screen on a real watch; how long the Ozon web session lives.
-- Ideas, not done: launch the watchapp from the phone (QS tile / shortcut), teens barcode
-  (`teensBarcode` in the API response), other marketplaces (WB has one personal code like Ozon;
-  Avito / AliExpress / CDEK have per-parcel codes - needs a provider interface and a list of
-  codes on the watch).
+- Watchapp updates: none needed in the app - the Pebble app updates it from the Pebble App
+  Store / Rebble. Real-life use (pickup point scan etc.) was tested by the user.
+- Other marketplaces: needs research first (WB has one personal code like Ozon; Avito /
+  AliExpress / CDEK have per-parcel codes - would need a provider interface and a list of codes
+  on the watch).
 - License: MIT (`LICENSE`, `README.md` with the "unofficial, not affiliated with Ozon" disclaimer).
