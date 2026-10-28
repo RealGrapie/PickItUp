@@ -24,7 +24,8 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   Strings.kt            all UI texts, RU + EN;  AppSettings.kt  language, theme, flags
   BarcodeStore.kt       saved code, settings, journal;  Code128.kt  same encoder as the watch
   RefreshSchedule.kt    interval / daily refresh math;  RefreshJobService.kt  background job
-  Updater.kt            update check (GitHub Releases API) + APK download -> system installer
+  Updater.kt            update check (GitHub Releases API) + APK download -> PackageInstaller session
+  InstallReceiver.kt    installer session result: shows the system confirmation when needed
 ```
 
 ## Identity
@@ -138,9 +139,13 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   (no WebView: no Chromium), on every launch (`MainActivity.onCreate` without saved state; settings switch "check
   automatically", default on) and by "Check for updates" in settings. The card's close button
   skips that version on the main screen (settings always show it; a manual check un-skips). A newer tag (`v1.2` vs `versionName`, numeric compare) shows `UpdateCard` (main
-  screen, onboarding, settings); "Update" downloads the first `.apk` asset to `cache/update/`,
-  checks package name + higher versionCode, opens it via FileProvider (`${applicationId}.files`)
-  in the system installer (REQUEST_INSTALL_PACKAGES; Android asks once to allow PickItUp!).
+  screen, onboarding, settings); "Update" downloads the first `.apk` asset to
+  `cache/update/pickitup-<version>.apk` (reused while its SHA-256 matches the asset's GitHub
+  `digest`, so a missed install dialog doesn't re-download), checks package name + higher
+  versionCode and installs it with our own PackageInstaller session (`USER_ACTION_NOT_REQUIRED`:
+  silent on Android 12+ once PickItUp! is the installer of record, i.e. after its first
+  self-update; else `InstallReceiver` starts the system confirmation). REQUEST_INSTALL_PACKAGES
+  + the user's one-time "install unknown apps" switch are still required. Cancelling is not an error.
   So every release needs: a `vX.Y` tag, an attached `pickitup.apk` signed with the release key,
   and a bumped `versionCode` / `versionName` (+ `watch/package.json` `version`). Release body
   format (`localizedNotes`, tested in `ReleaseNotesTest`): a `## English` section, then

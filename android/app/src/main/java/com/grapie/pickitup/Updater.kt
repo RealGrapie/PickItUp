@@ -1,10 +1,11 @@
 package com.grapie.pickitup
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.content.SharedPreferences
 import android.util.Log
-import androidx.core.content.FileProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -15,14 +16,16 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /** A GitHub release newer than the installed app. */
-data class Release(val version: String, val apkUrl: String, val notes: String)
+data class Release(val version: String, val apkUrl: String, val notes: String, val apkSha256: String = "")
 
 /**
  * Updates from GitHub Releases: [check] reads the latest release (by itself once per app launch,
- * see [checkOnLaunch]), [install] downloads its APK and hands it to the system installer. Plain HTTP, no
- * WebView: this must not load Chromium. The system refuses an APK signed with another key.
+ * see [checkOnLaunch]), [install] downloads its APK (kept and reused while its SHA-256 matches
+ * GitHub's digest) and installs it with a PackageInstaller session. Plain HTTP, no WebView: this
+ * must not load Chromium. The system refuses an APK signed with another key.
  */
 object Updater {
     private const val TAG = "Updater"
@@ -40,6 +43,8 @@ object Updater {
     /** Download progress 0..1 while the APK is downloading, else null. */
     val progress = MutableStateFlow<Float?>(null)
     val failed = MutableStateFlow(false)
+    /** The APK is handed to the system installer; cleared when it fails or the user cancels. */
+    val installing = MutableStateFlow(false)
     /** A version hidden from the main screen with the card's close button. */
     val skipped = MutableStateFlow<String?>(null)
     /** Settings switch: check by itself on every app launch and show the card on the main screen. */
@@ -54,7 +59,7 @@ object Updater {
         val v = prefs.getString("version", null)
         // Gone once that version (or a later one) is installed.
         available.value = if (v != null && isNewer(v, installed))
-            Release(v, prefs.getString("apkUrl", "")!!, prefs.getString("notes", "")!!) else null
+            Release(v, prefs.getString("apkUrl", "")!!, prefs.getString("notes", "")!!, prefs.getString("apkSha", "")!!) else null
         // The downloaded APK is never reused (install() downloads again): once nothing newer is
         // pending it is installed or stale. Kept while an update is pending, the installer may
         // still be reading it. The WebView cache stays: Chromium caps it (~20 MB) and reuses it.
@@ -110,8 +115,9 @@ object Updater {
                 val newer = rel?.takeIf { isNewer(it.version, installed) }
                 available.value = newer
                 prefs.edit().apply {
-                    if (newer == null) remove("version").remove("apkUrl").remove("notes")
+                    if (newer == null) remove("version").remove("apkUrl").remove("notes").remove("apkSha")
                     else putString("version", newer.version).putString("apkUrl", newer.apkUrl).putString("notes", newer.notes)
+                        .putString("apkSha", newer.apkSha256)
                 }.apply()
             }
         }
@@ -133,39 +139,108 @@ object Updater {
                 json.getString("tag_name").removePrefix("v"),
                 apk.getString("browser_download_url"),
                 json.optString("body").replace("\r\n", "\n").trim(),
+                // "sha256:<hex>" since GitHub publishes asset digests; older assets have none.
+                apk.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:").orEmpty(),
             )
         } finally {
             c.disconnect()
         }
     }
 
-    /** Downloads the APK into the cache and opens the system installer on it. */
+    /**
+     * Gets the APK (the one already downloaded, if its checksum still matches) and installs it.
+     * A missed or cancelled confirmation is not fatal: "Update" again reuses the file.
+     */
     fun install(context: Context) {
         val rel = available.value ?: return
-        if (progress.value != null) return
+        if (progress.value != null) return  // a second tap while installing starts a fresh session
         val app = context.applicationContext
         failed.value = false
         progress.value = 0f
         scope.launch {
-            val file = runCatching { withContext(Dispatchers.IO) { download(app, rel.apkUrl) } }
+            val file = runCatching { withContext(Dispatchers.IO) { apkFor(app, rel) } }
                 .onFailure { Log.w(TAG, "download failed", it) }.getOrNull()
             progress.value = null
             if (file == null || !isOurUpdate(app, file)) {
                 failed.value = true
                 return@launch
             }
-            val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
-            // The first time the system asks to allow installs from PickItUp, then goes on.
-            app.startActivity(
-                Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
+            installing.value = true
+            runCatching { withContext(Dispatchers.IO) { commitSession(app, file) } }.onFailure {
+                Log.w(TAG, "install session failed", it)
+                installing.value = false
+                failed.value = true
+            }
         }
     }
 
-    private fun download(context: Context, url: String): File {
-        val dir = File(context.cacheDir, "update").apply { deleteRecursively(); mkdirs() }
-        val file = File(dir, "pickitup.apk")
+    /** From [InstallReceiver]: the session ended without replacing the app. */
+    fun onInstallEnded(status: Int, message: String?) {
+        installing.value = false
+        // The user closing the confirmation is not an error: the card stays, the file too.
+        if (status != PackageInstaller.STATUS_FAILURE_ABORTED) {
+            Log.w(TAG, "install failed: $status $message")
+            failed.value = true
+        }
+    }
+
+    /**
+     * Our own installer session instead of ACTION_VIEW: no FileProvider, and on Android 12+ no
+     * confirmation at all once PickItUp! installed the current version itself (it is then the
+     * installer of record). Otherwise the system asks, via [InstallReceiver].
+     */
+    private fun commitSession(context: Context, file: File) {
+        val installer = context.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(context.packageName)
+            setSize(file.length())
+            setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        }
+        val id = installer.createSession(params)
+        installer.openSession(id).use { session ->
+            session.openWrite("pickitup.apk", 0, file.length()).use { out ->
+                file.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val result = PendingIntent.getBroadcast(
+                context, id, Intent(context, InstallReceiver::class.java),
+                // Mutable: the system adds the status extras.
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+            )
+            session.commit(result.intentSender)
+        }
+    }
+
+    /** The release's APK in cache/update/: reused while it matches GitHub's SHA-256, else downloaded. */
+    private fun apkFor(context: Context, rel: Release): File {
+        val dir = File(context.cacheDir, "update").apply { mkdirs() }
+        val file = File(dir, "pickitup-${rel.version}.apk")
+        if (rel.apkSha256.isNotEmpty() && file.exists() && sha256(file) == rel.apkSha256) return file
+        dir.listFiles()?.forEach { it.delete() }  // an older version's APK or a broken download
+        val part = File(dir, file.name + ".part")
+        download(rel.apkUrl, part)
+        if (rel.apkSha256.isNotEmpty() && sha256(part) != rel.apkSha256) {
+            part.delete()
+            error("checksum mismatch")
+        }
+        if (!part.renameTo(file)) error("rename failed")
+        return file
+    }
+
+    private fun sha256(file: File): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    private fun download(url: String, file: File) {
         // GitHub redirects the asset to its CDN (https -> https: followed by HttpURLConnection).
         val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 15_000
@@ -189,7 +264,6 @@ object Updater {
         } finally {
             c.disconnect()
         }
-        return file
     }
 
     /** Same package and really newer: don't send the user to the installer with a wrong file. */

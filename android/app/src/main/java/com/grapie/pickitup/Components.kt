@@ -212,6 +212,7 @@ fun UpdateCard(modifier: Modifier = Modifier, skippable: Boolean = false) {
     val release by Updater.available.collectAsStateWithLifecycle()
     val progress by Updater.progress.collectAsStateWithLifecycle()
     val failed by Updater.failed.collectAsStateWithLifecycle()
+    val installing by Updater.installing.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val skipped by Updater.skipped.collectAsStateWithLifecycle()
     val autoCheck by Updater.autoCheck.collectAsStateWithLifecycle()
@@ -232,6 +233,8 @@ fun UpdateCard(modifier: Modifier = Modifier, skippable: Boolean = false) {
             teaser?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = on, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+            // Buttons stay: if the system dialog was missed, "Update" brings it back (same file).
+            if (installing) Text(s.updateInstalling, style = MaterialTheme.typography.labelLarge, color = on)
             if (failed) Text(s.updateFailed, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
             Spacer(Modifier.height(4.dp))
             val p = progress
