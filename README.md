@@ -95,6 +95,10 @@ PickItUp! is written mostly with AI (Claude Code) and developed through AI-assis
 - Code and architecture follow AI-friendly patterns: [CLAUDE.md](CLAUDE.md) holds the project
   context, conventions and hard-won rules, so start there, with or without an AI assistant.
 
+## Acknowledgements
+
+- [Mamkin-Xakep](https://github.com/Mamkin-Xakep) for the original idea of the app.
+
 ## License
 
 [MIT](LICENSE) © 2026 Grapie. Material icons: Apache License 2.0 (Google).
