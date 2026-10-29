@@ -131,7 +131,7 @@ class DebugActivity : BaseActivity() {
                     log.asReversed().forEach {
                         Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { BarcodeStore.log.value = emptyList() }) { Text(s.clearJournal) }
+                    TextButton(onClick = { BarcodeStore.clearLog() }) { Text(s.clearJournal) }
                 }
             }
         }

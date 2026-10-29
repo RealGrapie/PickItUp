@@ -84,8 +84,12 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   Material `TimePicker` dialog, 24 h, default 06:00 (`dailyMinutes`). Stale =
   older than the interval / fetched before the last passed daily time (`RefreshSchedule.isStale`).
 - **Background refresh**: `RefreshJobService` (JobScheduler, job id 1001, network required,
-  persisted): INTERVAL = periodic job; DAILY = one-shot job at the next daily time (extra
-  `target`, deadline +30 min), re-armed after each run, retry in 30 min after an error. Switch
+  persisted): INTERVAL = periodic job; DAILY = exact allow-while-idle alarm (USE_EXACT_ALARM,
+  `RefreshAlarmReceiver`, re-armed on boot / app update) that starts an expedited job (runs in
+  Doze, waits for a network), retry alarm in 30 min after an error. A plain delayed job was late
+  in Doze (timer waits for a maintenance window) and got cancelled on a cold start: App.onCreate's
+  schedule() replaced the job that was just starting ("cancelled while waiting for bind").
+  The debug journal is persisted (last 100 lines, with dates). Switch
   "Обновлять в фоне, даже если watchapp не открывали" (`backgroundRefresh`, default on).
   Scheduled from `PickItUpApp.onCreate` and on every settings change; `schedule()` skips an
   identical pending job (re-scheduling resets the period) and never throws. Needs

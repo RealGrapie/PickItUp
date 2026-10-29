@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Daily refresh at the chosen minute, also in Doze. Granted at install (not a Play app);
+         Android 12L and older grant SCHEDULE_EXACT_ALARM by default instead. -->
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <!-- Updates from GitHub Releases: the downloaded APK goes to the system installer. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -51,6 +55,15 @@
         <receiver
             android:name=".InstallReceiver"
             android:exported="false" />
+
+        <receiver
+            android:name=".RefreshAlarmReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <service
             android:name=".RefreshJobService"

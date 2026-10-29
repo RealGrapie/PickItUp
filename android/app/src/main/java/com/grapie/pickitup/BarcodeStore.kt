@@ -52,6 +52,7 @@ object BarcodeStore {
             Barcode(it, prefs.getString("visible", it)!!, prefs.getLong("fetchedAt", 0))
         }
         demo.value = prefs.getBoolean("demo", false)
+        log.value = prefs.getString("journal", null)?.split('\n').orEmpty()
         // Builds before the cache had only the cookie: read it once.
         if (prefs.contains("loggedIn")) loggedIn.value = prefs.getBoolean("loggedIn", false)
         else setLoggedIn(OzonClient.isLoggedIn())
@@ -121,8 +122,15 @@ object BarcodeStore {
         updateShown()
     }
 
-    private val fmt = SimpleDateFormat("HH:mm:ss", Locale.US)
+    // With the date: the journal is kept across restarts (background runs start the app anew).
+    private val fmt = SimpleDateFormat("dd.MM HH:mm:ss", Locale.US)
     fun log(msg: String) {
         log.value = (log.value + "${fmt.format(Date())}  $msg").takeLast(100)
+        prefs.edit().putString("journal", log.value.joinToString("\n")).apply()
+    }
+
+    fun clearLog() {
+        log.value = emptyList()
+        prefs.edit().remove("journal").apply()
     }
 }
