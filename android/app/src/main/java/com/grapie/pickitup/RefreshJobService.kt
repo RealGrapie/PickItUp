@@ -16,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -38,12 +39,14 @@ class RefreshJobService : JobService() {
             val r = BarcodeSync.refresh(applicationContext)
             // Delivered only if the watchapp is open right now; otherwise it asks on its next start.
             if (r is FetchResult.Ok) BarcodeSync.sendToWatch(applicationContext)
+            // Keep the process alive while the hidden page settles (rotated login tokens).
+            if (r !is FetchResult.Vpn && !BarcodeStore.demo.value) delay(OzonClient.SETTLE_MS + 2_000)
             if (daily) {
                 jobFinished(params, false)
                 // After a failure try again in half an hour (the next day's alarm is already set).
-                if (r is FetchResult.Error) schedule(applicationContext, retryAt = System.currentTimeMillis() + RETRY_MS)
+                if (r is FetchResult.Error || r is FetchResult.Vpn) schedule(applicationContext, retryAt = System.currentTimeMillis() + RETRY_MS)
             } else {
-                jobFinished(params, r is FetchResult.Error)  // periodic: let the system back off and retry
+                jobFinished(params, r is FetchResult.Error || r is FetchResult.Vpn)  // periodic: let the system back off and retry
             }
         }
         return true

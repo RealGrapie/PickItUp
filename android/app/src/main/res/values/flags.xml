@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- No Ozon requests through a VPN (Net); off in sniff builds, whose capture proxy is a local VPN. -->
+    <bool name="vpn_guard">true</bool>
+</resources>

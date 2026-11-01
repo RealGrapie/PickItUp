@@ -129,9 +129,11 @@ class MainActivity : BaseActivity() {
         val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
         val busy by BarcodeStore.busy.collectAsStateWithLifecycle()
         val sessionLost by BarcodeStore.loginNeeded.collectAsStateWithLifecycle()
-        val loginNeeded = sessionLost && !demo
         // The UI needs a real account id: guest cookies without one (e.g. an antibot page) still mean "log in".
         val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+        // loginNeeded lives only in memory: after a restart the persisted loggedIn = false must
+        // still show the "session ended" card over an old code (a background run found it out).
+        val loginNeeded = (sessionLost || !loggedIn) && !demo
         val canRefresh = demo || loggedIn
 
         val onboarding = !canRefresh && barcode == null
@@ -192,6 +194,8 @@ class MainActivity : BaseActivity() {
                     PillButton(s.login, R.drawable.ic_login, ::login, Modifier.widthIn(min = 220.dp))
                 }
                 Spacer(Modifier.weight(1.3f))
+                val vpn by Net.vpn.collectAsStateWithLifecycle()
+                AnimatedVisibility(vpn) { VpnCard(Modifier.padding(bottom = 16.dp)) }
                 UpdateCard(Modifier.padding(bottom = 16.dp), skippable = true)
             }
         }
@@ -213,6 +217,7 @@ class MainActivity : BaseActivity() {
         val s = LocalStrings.current
         val barcode by BarcodeStore.shown.collectAsStateWithLifecycle()
         val watchStatus by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
+        val vpn by Net.vpn.collectAsStateWithLifecycle()
         val connected by Watches.connected.collectAsStateWithLifecycle()
         val lastWatch by Watches.last.collectAsStateWithLifecycle()
         var fullscreen by remember { mutableStateOf(false) }
@@ -257,6 +262,7 @@ class MainActivity : BaseActivity() {
                     BarcodeCard(barcode, busy, onEnlarge = { fullscreen = true })
 
                     AnimatedVisibility(loginNeeded && barcode != null) { SessionCard() }
+                    AnimatedVisibility(vpn && !BarcodeStore.demo.value) { VpnCard() }
                     UpdateCard(skippable = true)
 
                     Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
@@ -375,6 +381,19 @@ class MainActivity : BaseActivity() {
                     s.showToStaff, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
+            }
+        }
+    }
+
+    @Composable
+    private fun VpnCard(modifier: Modifier = Modifier) {
+        val s = LocalStrings.current
+        Surface(color = MaterialTheme.colorScheme.tertiaryContainer, shape = MaterialTheme.shapes.large, modifier = modifier) {
+            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(s.vpnTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                Text(s.vpnText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                Spacer(Modifier.height(4.dp))
+                PillButton(s.vpnSettings, R.drawable.ic_settings, { startActivity(Intent(Settings.ACTION_VPN_SETTINGS)) }, tonal = true)
             }
         }
     }

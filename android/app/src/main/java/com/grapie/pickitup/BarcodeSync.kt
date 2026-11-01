@@ -59,6 +59,7 @@ object BarcodeSync {
         val status = when (val r = refresh(context)) {
             is FetchResult.Ok -> ""
             FetchResult.LoginNeeded -> "Log in on phone"
+            FetchResult.Vpn -> "VPN on phone"
             is FetchResult.Error -> "Update failed"
         }
         sendToWatch(context, status)
@@ -104,6 +105,11 @@ object BarcodeSync {
             BarcodeStore.loginNeeded.value = true
             return@withLock FetchResult.LoginNeeded
         }
+        if (Net.vpnActive(context)) {
+            // Ozon sees the VPN's address: a login from abroad may get ended. Split tunneling is fine.
+            BarcodeStore.log(AppSettings.strings().logVpn)
+            return@withLock FetchResult.Vpn
+        }
         BarcodeStore.busy.value = true
         val s = AppSettings.strings()
         BarcodeStore.log(s.logFetching)
@@ -126,6 +132,7 @@ object BarcodeSync {
                 BarcodeStore.log(s.logLoginNeeded)
             }
             is FetchResult.Error -> BarcodeStore.log(s.logError(r.message))
+            FetchResult.Vpn -> Unit  // never comes from OzonClient
         }
         r
     }

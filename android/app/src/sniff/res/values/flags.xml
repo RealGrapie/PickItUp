@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Reqable / HttpCanary capture through a local VPN. -->
+    <bool name="vpn_guard">false</bool>
+</resources>

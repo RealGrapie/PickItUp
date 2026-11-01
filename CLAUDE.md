@@ -13,6 +13,7 @@ watch/src/c/   Pebble C watchapp (SDK 4.33.1)
   qr.c         QR encoder: byte mode, level M v1-2 (26 bytes), level L v1-5 (106 bytes)
 android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2 (io.rebble.pebblekit2)
   OzonClient.kt         hidden-WebView fetch of the barcode, login/cookie checks
+  Net.kt                is this app's traffic on a VPN (per-UID default network)
   BarcodeSync.kt        fetch + push to the watch, WatchKeys (AppMessage keys, watch UUID)
   WatchListenerService  bound by the Pebble app when the watchapp sends a request
   LoginActivity.kt      Ozon site in a WebView: login (auto-closes) or any page (orders)
@@ -175,6 +176,20 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   queues them forever. Use `Handler(Looper.getMainLooper())`.
 - Ozon replaces the document right after load, killing an in-flight `fetch` silently. `OzonClient`
   polls and re-sends the fetch if no answer within 10 s; don't fire once from `onPageFinished`.
+- Login tokens rotate (Reqable capture, 2026-11-01): `__Secure-access-token` lives 2 h
+  (`expiresIn: 7200`; cookies themselves expire in a year); a request after that gets a new
+  access + refresh pair in Set-Cookie - the document load AND the page's own API calls
+  (`summaryV2` rotated again right after the document). A WebView destroyed while such a call is
+  in flight loses the newest pair -> the session dies on the next fetch (beta testers: "logged out
+  after a couple of days"). So the hidden WebView answers every `www.ozon.ru/api/` call except
+  `prefetchBarcode` itself with `{}` (`shouldInterceptRequest`), stays alive `SETTLE_MS` = 8 s
+  after the answer (background jobs wait too) and logs short SHA-256 prints of the tokens
+  ("🔐 Login tokens: a → b") to the journal. LoginActivity is not affected.
+- VPN: no Ozon request while this app's own traffic goes through a VPN (`Net`, per-UID default
+  network, so split tunneling that excludes PickItUp! is fine); `FetchResult.Vpn`, card on the main
+  screen, watch status "VPN on phone". Off in the `sniff` build (`R.bool.vpn_guard`).
+- `sniff` build type (`./gradlew assembleSniff`) = release + trusts user CAs (`src/sniff`) + no
+  VPN guard: for Reqable / HttpCanary captures (they run as a local VPN). Same key and id.
 - A logged-out session gets `HTTP 500 {"error":"rpc error ..."}`, not 401. JSON 5xx is final (no
   retries); `isLoggedIn()` then decides "login needed" vs a real error. Antibot blocks are HTML 403
   and do retry.

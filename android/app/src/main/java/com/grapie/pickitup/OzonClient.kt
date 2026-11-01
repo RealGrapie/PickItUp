@@ -7,6 +7,8 @@ import android.os.Looper
 import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import kotlinx.coroutines.Dispatchers
@@ -14,12 +16,15 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
+import java.security.MessageDigest
 import kotlin.coroutines.resume
 
 sealed interface FetchResult {
     data class Ok(val barcode: Barcode) : FetchResult
     data object LoginNeeded : FetchResult
     data class Error(val message: String) : FetchResult
+    /** Not tried: the app's traffic goes through a VPN ([Net.vpnActive]). */
+    data object Vpn : FetchResult
 }
 
 /**
@@ -36,6 +41,8 @@ object OzonClient {
     private const val ATTEMPTS = 6
     private const val ATTEMPT_TIMEOUT_MS = 10_000L
     private const val RETRY_DELAY_MS = 3_000L
+    /** How long the hidden page lives on after the answer; background jobs wait for it too. */
+    const val SETTLE_MS = 8_000L
 
     private val FETCH_JS = """
         fetch('/api/composer-api.bx/_action/v2/prefetchBarcode', {
@@ -56,12 +63,33 @@ object OzonClient {
 
     suspend fun fetch(context: Context): FetchResult = withContext(Dispatchers.Main) {
         val web = WebView(context.applicationContext)
+        val before = tokenPrint()
         try {
             withTimeoutOrNull(TIMEOUT_MS) { fetchIn(web) } ?: FetchResult.Error(AppSettings.strings().timeout)
         } finally {
-            web.stopLoading()
-            web.destroy()
-            CookieManager.getInstance().flush()
+            // The page may be rotating the login tokens right now (Set-Cookie on its own requests):
+            // destroying it at once could lose the new ones, and Ozon ends the session on the next
+            // request with the revoked old ones. Keep it a while; the journal shows what changed.
+            Handler(Looper.getMainLooper()).postDelayed({
+                web.stopLoading()
+                web.destroy()
+                CookieManager.getInstance().flush()
+                BarcodeStore.log(AppSettings.strings().logTokens(before, tokenPrint()))
+            }, SETTLE_MS)
+        }
+    }
+
+    /** Journal-safe fingerprint of the login tokens: short name + 4 hex of SHA-256, never a value. */
+    private fun tokenPrint(): String {
+        val tokens = CookieManager.getInstance().getCookie("https://www.ozon.ru")
+            ?.split(';')?.map { it.trim() }
+            ?.filter { it.substringBefore('=').contains("token", ignoreCase = true) }
+            .orEmpty()
+        if (tokens.isEmpty()) return "-"
+        return tokens.joinToString(" ") { c ->
+            val name = c.substringBefore('=').removePrefix("__Secure-").removeSuffix("-token")
+            val hash = MessageDigest.getInstance("SHA-256").digest(c.substringAfter('=').toByteArray())
+            name + ":" + hash.take(2).joinToString("") { "%02x".format(it) }
         }
     }
 
@@ -93,6 +121,17 @@ object OzonClient {
         }, "OzonBridge")
 
         web.webViewClient = object : WebViewClient() {
+            // The page's own API calls rotate the login tokens too (seen: summaryV2 right after the
+            // document already had): one still in flight when the WebView goes loses the new pair.
+            // Answer them here, so only the document and our fetch ever touch the session.
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                val url = request.url
+                if (url.host != "www.ozon.ru" || url.path?.startsWith("/api/") != true) return null
+                if (url.path!!.endsWith("/prefetchBarcode")) return null
+                return WebResourceResponse("application/json", "utf-8", 200, "OK",
+                    mapOf("Access-Control-Allow-Origin" to "https://www.ozon.ru"), "{}".byteInputStream())
+            }
+
             override fun onPageFinished(view: WebView, url: String) {
                 Log.d(TAG, "page finished: $url")
                 if (url.startsWith("https://www.ozon.ru")) pageReady = true

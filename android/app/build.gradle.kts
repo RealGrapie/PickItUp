@@ -39,6 +39,11 @@ android {
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
     }
+    // Release that also trusts user CA certificates (src/sniff): to watch Ozon traffic with a
+    // proxy like Reqable. Same key and id, so it installs over a release without losing the login.
+    create("sniff") {
+      initWith(getByName("release"))
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_17
