@@ -1,0 +1,10 @@
+<!-- A table fork: the "clear journal" button (Russian meme "чистить вилкой"). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M8,2h1.5v6h1.75V2h1.5v6h1.75V2H16v7c0,1.86 -1.28,3.41 -3,3.86V22h-2v-9.14C9.28,12.41 8,10.86 8,9z" />
+</vector>

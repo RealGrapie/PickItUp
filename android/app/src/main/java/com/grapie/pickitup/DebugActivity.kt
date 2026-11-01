@@ -43,6 +43,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -131,7 +132,12 @@ class DebugActivity : BaseActivity() {
                     log.asReversed().forEach {
                         Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    TextButton(onClick = { BarcodeStore.clearLog() }) { Text(s.clearJournal) }
+                    // A fork: logs get cleaned with a fork (Russian meme).
+                    TextButton(onClick = { BarcodeStore.clearLog() }) {
+                        Icon(painterResource(R.drawable.ic_fork), null, Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text(s.clearJournal)
+                    }
                 }
             }
         }
