@@ -19,8 +19,8 @@ android {
     applicationId = "com.grapie.pickitup"
     minSdk = 31  // Android 12: the Pebble (Core Devices) app needs it anyway
     targetSdk = 37
-    versionCode = 8
-    versionName = "1.4.3"
+    versionCode = 9
+    versionName = "1.5"
   }
 
   signingConfigs {
