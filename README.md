@@ -95,6 +95,14 @@ PickItUp! is written mostly with AI (Claude Code) and developed through AI-assis
 - Code and architecture follow AI-friendly patterns: [CLAUDE.md](CLAUDE.md) holds the project
   context, conventions and hard-won rules, so start there, with or without an AI assistant.
 
+## Roadmap
+
+- [ ] Several Ozon accounts on one phone (e.g. for the family), switching between their codes on the watch
+- [ ] Other marketplaces
+- [x] The morning update comes exactly on time (1.5)
+- [x] The Ozon login no longer drops after a few days (1.5)
+- [x] No Ozon requests through a VPN (1.5)
+
 ## Acknowledgements
 
 - [Mamkin-Xakep](https://github.com/Mamkin-Xakep) for the original idea of the app.

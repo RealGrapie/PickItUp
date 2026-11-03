@@ -65,6 +65,8 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 
 - **Ozon API**: `POST https://www.ozon.ru/api/composer-api.bx/_action/v2/prefetchBarcode`, empty body.
   Response `data.barcode.code` (e.g. `<userId>*NNNN`), `visibleCode`, `cacheLifetime` (~100 h).
+  A code seems to stay valid for several days, not just its own day: on 3 Nov the user picked up
+  an order showing a code fetched on 1 Nov (so an "outdated" code on the watch is still worth showing).
   The code does not depend on orders and rotates about daily. The mobile-app variant on
   `api.ozon.ru` needs an `x-ad-id` signature from Ozon's native antibot SDK — do not use it.
 - **Antibot**: the website endpoint passes only with a full real-browser cookie/header set and
@@ -293,11 +295,18 @@ The WebView cookies hold a live Ozon session, and the barcode lets anyone pick u
 orders. Don't print full codes/tokens in logs or output. Traffic captures (`*.har`, gitignored)
 contain session tokens too; the original research captures were removed once the API was known.
 
-## Open items
+## Roadmap
 
-- Watchapp updates: none needed in the app - the Pebble app updates it from the Pebble App
-  Store / Rebble. Real-life use (pickup point scan etc.) was tested by the user.
-- Other marketplaces: needs research first (WB has one personal code like Ozon; Avito /
-  AliExpress / CDEK have per-parcel codes - would need a provider interface and a list of codes
-  on the watch).
+- [ ] Multi-account: several Ozon accounts (e.g. family) on one phone, switch / cycle codes on the watch.
+- [ ] Other marketplaces: research first (WB has one personal code like Ozon; Avito / AliExpress /
+  CDEK have per-parcel codes - would need a provider interface and a list of codes on the watch).
+- [x] Morning refresh on time (exact alarm + expedited job, 1.5).
+- [x] Ozon session lost to token rotation (1.5).
+- [x] No Ozon requests through a VPN, split tunneling respected (1.5).
+
+Not planned (dropped by the user): a watch "Outdated" screen instead of the old code (built
+2026-11-02, patch in `backup/watch-outdated-screen.patch`, gitignored), teens barcode, launching the watchapp from the phone,
+an in-app watchapp updater (the Pebble app updates it from the stores), Ozon orders / notifications.
+
+- Real-life use (pickup point scan etc.) was tested by the user.
 - License: MIT (`LICENSE`, `README.md` with the "unofficial, not affiliated with Ozon" disclaimer).
