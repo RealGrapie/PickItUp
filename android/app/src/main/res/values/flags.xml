@@ -2,4 +2,8 @@
 <resources>
     <!-- No Ozon requests through a VPN (Net); off in sniff builds, whose capture proxy is a local VPN. -->
     <bool name="vpn_guard">true</bool>
+    <!-- chrome://inspect for the WebViews: sniff builds only (session research). -->
+    <bool name="webview_debug">false</bool>
+    <!-- SessionProbe (idle-gap test of the Ozon session) and a log copy adb can read: sniff only. -->
+    <bool name="session_probe">false</bool>
 </resources>

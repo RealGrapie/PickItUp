@@ -25,6 +25,11 @@ class Strings(
     val sectionBarcode: String,
     val refreshLabel: String,
     val backgroundLabel: String,
+    val backgroundLabelNoWatch: String,
+    val watchEnabledLabel: String,
+    val watchEnabledHint: String,
+    val openAfterLabel: String,
+    val openAfterHint: String,
     val modeInterval: String,
     val modeDaily: String,
     val refreshHint: String,
@@ -98,6 +103,7 @@ class Strings(
     val journal: String,
     val empty: String,
     val clearJournal: String,
+    val shareDebugLog: String,
     // Watch status
     val watchStatus: (WatchStatus) -> String,
     // Login page
@@ -108,6 +114,8 @@ class Strings(
     val logLoginNeeded: String,
     val logVpn: String,
     val logTokens: (String, String) -> String,
+    val logTokensChanged: (String, String) -> String,
+    val logLoginOpen: String,
     val logError: (String) -> String,
     val logLoggedOut: String,
     val logWatchAsked: String,
@@ -197,6 +205,11 @@ class Strings(
             sectionBarcode = "Штрихкод",
             refreshLabel = "Обновлять штрихкод",
             backgroundLabel = "Обновлять в фоне, даже если watchapp не открывали",
+            backgroundLabelNoWatch = "Обновлять в фоне",
+            watchEnabledLabel = "У меня есть Pebble",
+            watchEnabledHint = "Выключите, если часов нет: приложение не будет связываться с часами и скроет всё, что их касается",
+            openAfterLabel = "Открывать watchapp после фонового обновления",
+            openAfterHint = "Чтобы новый код сразу попал на часы. Watchapp закроется сам по таймеру из раздела Watchapp",
             modeInterval = "Каждые",
             modeDaily = "Каждый день в",
             refreshHint = "Если открывается watchapp, устаревший код обновляется сразу.",
@@ -274,6 +287,7 @@ class Strings(
             journal = "Журнал",
             empty = "пусто",
             clearJournal = "Очистить журнал",
+            shareDebugLog = "Отправить подробный лог",
             watchStatus = {
                 when (it) {
                     WatchStatus.UNKNOWN -> "Ещё ничего не отправляли"
@@ -291,6 +305,8 @@ class Strings(
             logLoginNeeded = "🔑 Нужно войти в Ozon",
             logVpn = "🛡️ Включён VPN, Ozon не запрашивается",
             logTokens = { a, b -> "🔐 Токены входа: $a → $b" },
+            logTokensChanged = { a, b -> "⚠️ Токены сменились между обновлениями: $a → $b" },
+            logLoginOpen = "🌐 В приложении открыт сайт Ozon, обновление отложено",
             logError = { "❌ Ошибка: $it" },
             logLoggedOut = "Вышли из Ozon",
             logWatchAsked = "⌚ watchapp запросил штрихкод",
@@ -376,6 +392,11 @@ class Strings(
             sectionBarcode = "Barcode",
             refreshLabel = "Refresh the barcode",
             backgroundLabel = "Also refresh in the background, even if the watchapp isn't opened",
+            backgroundLabelNoWatch = "Refresh in the background",
+            watchEnabledLabel = "I have a Pebble",
+            watchEnabledHint = "Turn off if you have no watch: the app won't talk to a watch and hides everything about it",
+            openAfterLabel = "Open the watchapp after a background refresh",
+            openAfterHint = "So the new code gets to the watch right away. The watchapp closes itself on the Watchapp timer",
             modeInterval = "Every",
             modeDaily = "Every day at",
             refreshHint = "When the watchapp opens, an outdated code is refreshed right away.",
@@ -453,6 +474,7 @@ class Strings(
             journal = "Journal",
             empty = "empty",
             clearJournal = "Clear journal",
+            shareDebugLog = "Share detailed log",
             watchStatus = {
                 when (it) {
                     WatchStatus.UNKNOWN -> "Nothing sent yet"
@@ -470,6 +492,8 @@ class Strings(
             logLoginNeeded = "🔑 Ozon login needed",
             logVpn = "🛡️ VPN is on, Ozon not contacted",
             logTokens = { a, b -> "🔐 Login tokens: $a → $b" },
+            logTokensChanged = { a, b -> "⚠️ Login tokens changed between refreshes: $a → $b" },
+            logLoginOpen = "🌐 An Ozon page is open in the app, refresh postponed",
             logError = { "❌ Error: $it" },
             logLoggedOut = "Logged out of Ozon",
             logWatchAsked = "⌚ Watchapp asked for the barcode",

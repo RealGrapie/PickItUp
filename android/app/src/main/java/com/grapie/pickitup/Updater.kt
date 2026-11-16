@@ -60,9 +60,9 @@ object Updater {
         // Gone once that version (or a later one) is installed.
         available.value = if (v != null && isNewer(v, installed))
             Release(v, prefs.getString("apkUrl", "")!!, prefs.getString("notes", "")!!, prefs.getString("apkSha", "")!!) else null
-        // The downloaded APK is never reused (install() downloads again): once nothing newer is
-        // pending it is installed or stale. Kept while an update is pending, the installer may
-        // still be reading it. The WebView cache stays: Chromium caps it (~20 MB) and reuses it.
+        // Once nothing newer is pending the downloaded APK is installed or stale. While an update
+        // is pending it is kept: apkFor() reuses it (checksum) and the installer may still be
+        // reading it. The WebView cache stays: Chromium caps it (~20 MB) and reuses it.
         if (available.value == null) File(context.cacheDir, "update").deleteRecursively()
     }
 
@@ -172,6 +172,21 @@ object Updater {
                 failed.value = true
             }
         }
+    }
+
+    /** The system confirmation that came while no screen of ours was shown (see [InstallReceiver]). */
+    private var pendingConfirm: Intent? = null
+
+    fun deferConfirm(confirm: Intent) {
+        pendingConfirm = confirm
+    }
+
+    /** From [BaseActivity.onResume]. */
+    fun showDeferredConfirm(context: Context) {
+        val confirm = pendingConfirm ?: return
+        pendingConfirm = null
+        runCatching { context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            .onFailure { onInstallEnded(PackageInstaller.STATUS_FAILURE, it.message) }
     }
 
     /** From [InstallReceiver]: the session ended without replacing the app. */

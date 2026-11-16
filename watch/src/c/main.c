@@ -34,6 +34,9 @@
 #define STATUS_UPDATING "Updating..."
 #define STATUS_OFFLINE "Phone offline"
 #define STATUS_NO_ANSWER "No answer from phone"
+#define STATUS_TOO_LONG "Code too long"
+#define REQUEST_RETRY_MS 300
+#define REQUEST_RETRIES 10
 // The companion answers a request at once; silence this long means it isn't installed.
 #define PHONE_ANSWER_TIMEOUT_MS 5000
 // After "Updating..." the result follows within the companion's 60 s fetch timeout.
@@ -457,14 +460,28 @@ static void fetch_timeout(void *data) {
   layer_mark_dirty(s_canvas);
 }
 
+static int s_request_kind;
+static int s_request_tries;
+
+// The outbox may still be busy with the previous message: try again shortly instead of dropping
+// the request (5 s later the silence would read as "companion not installed").
+static void send_request(void *data) {
+  DictionaryIterator *it;
+  if (app_message_outbox_begin(&it) != APP_MSG_OK) {
+    if (++s_request_tries < REQUEST_RETRIES) app_timer_register(REQUEST_RETRY_MS, send_request, NULL);
+    return;
+  }
+  dict_write_int32(it, MESSAGE_KEY_Request, s_request_kind);
+  app_message_outbox_send();
+}
+
 static void request_from_phone(int kind) {
   s_phone = PHONE_WAITING;
   if (s_answer_timer) app_timer_cancel(s_answer_timer);
   s_answer_timer = app_timer_register(PHONE_ANSWER_TIMEOUT_MS, answer_timeout, NULL);
-  DictionaryIterator *it;
-  if (app_message_outbox_begin(&it) != APP_MSG_OK) return;
-  dict_write_int32(it, MESSAGE_KEY_Request, kind);
-  app_message_outbox_send();
+  s_request_kind = kind;
+  s_request_tries = 0;
+  send_request(NULL);
 }
 
 static void outbox_failed(DictionaryIterator *it, AppMessageResult reason, void *context) {
@@ -491,6 +508,7 @@ static void restart_exit_timer(void) {
 
 static void inbox_received(DictionaryIterator *it, void *context) {
   Tuple *t;
+  bool too_long = false;
   s_phone = PHONE_ANSWERED;
   if ((t = dict_find(it, MESSAGE_KEY_Code)) && t->type == TUPLE_CSTRING && t->length <= 1) {
     // Empty code = logged out on the phone: forget the stored one, back to the setup screens.
@@ -501,6 +519,9 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     persist_delete(PERSIST_VISIBLE);
     persist_delete(PERSIST_UPDATED);
     restart_exit_timer();
+  } else if (t && t->type == TUPLE_CSTRING && t->length - 1 > CODE128_MAX_CHARS) {
+    // Cut short it would still scan, as a wrong code: keep the stored one and say so.
+    too_long = true;
   } else if (t && t->type == TUPLE_CSTRING) {
     bool first = !s_nwidths;
     strncpy(s_code, t->value->cstring, sizeof(s_code) - 1);
@@ -509,12 +530,12 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     encode();
     if (first) restart_exit_timer();  // leaving the setup screens arms the auto-exit
   }
-  if ((t = dict_find(it, MESSAGE_KEY_Visible)) && t->type == TUPLE_CSTRING) {
+  if (!too_long && (t = dict_find(it, MESSAGE_KEY_Visible)) && t->type == TUPLE_CSTRING) {
     strncpy(s_visible, t->value->cstring, sizeof(s_visible) - 1);
     s_visible[sizeof(s_visible) - 1] = '\0';
     persist_write_string(PERSIST_VISIBLE, s_visible);
   }
-  if ((t = dict_find(it, MESSAGE_KEY_Updated))) {
+  if (!too_long && (t = dict_find(it, MESSAGE_KEY_Updated))) {
     s_updated = (time_t)t->value->int32;
     persist_write_int(PERSIST_UPDATED, (int32_t)s_updated);
   }
@@ -525,6 +546,7 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     s_fetch_timer = strcmp(s_status, STATUS_UPDATING) == 0
         ? app_timer_register(PHONE_FETCH_TIMEOUT_MS, fetch_timeout, NULL) : NULL;
   }
+  if (too_long) snprintf(s_status, sizeof(s_status), STATUS_TOO_LONG);
   if ((t = dict_find(it, MESSAGE_KEY_Timeout))) {
     int timeout = t->value->int32;
     if (timeout != s_timeout_s) {
@@ -558,6 +580,8 @@ static void select_long_click(ClickRecognizerRef recognizer, void *context) {
 
 static void up_click(ClickRecognizerRef recognizer, void *context) {
   restart_exit_timer();
+  // One refresh at a time: each one makes Ozon rotate the login tokens.
+  if (strcmp(s_status, STATUS_UPDATING) == 0) return;
   if (!connection_service_peek_pebble_app_connection()) {
     snprintf(s_status, sizeof(s_status), STATUS_OFFLINE);
   } else {

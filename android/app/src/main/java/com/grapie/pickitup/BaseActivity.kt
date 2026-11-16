@@ -70,6 +70,43 @@ internal val LocalStrings = staticCompositionLocalOf { Strings.RU }
  * predictive back gesture) is the system's standard cross-activity animation.
  */
 abstract class BaseActivity : ComponentActivity() {
+    companion object {
+        /** Screens of ours in front: activity starts from the background are blocked. */
+        var resumed = 0
+            private set
+        private var started = 0
+
+        /** Every screen of ours, LoginActivity too (it isn't a BaseActivity), counts here. */
+        fun uiStarted() { if (started++ == 0) DebugLog.d("ui", "app in foreground") }
+        // A swipe from Recents kills the process after this; the next start logs it as REMOVE TASK.
+        fun uiStopped() { if (--started == 0) DebugLog.d("ui", "app in background") }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        resumed++
+        DebugLog.d("ui", "${javaClass.simpleName} shown")
+        Updater.showDeferredConfirm(this)
+    }
+
+    override fun onPause() {
+        resumed--
+        // finishing = back / closed; else another screen of ours, Home or Recents.
+        DebugLog.d("ui", "${javaClass.simpleName} " + if (isFinishing) "closed" else "hidden")
+        super.onPause()
+    }
+
+    // Started (not resumed) screens: between two of ours both are paused for a moment, never both stopped.
+    override fun onStart() {
+        super.onStart()
+        uiStarted()
+    }
+
+    override fun onStop() {
+        uiStopped()
+        super.onStop()
+    }
+
     /** Theme, strings and transparent system bars that follow the app theme (not the system one). */
     protected fun setScreen(content: @Composable () -> Unit) = setContent {
         val language by AppSettings.language.collectAsStateWithLifecycle()

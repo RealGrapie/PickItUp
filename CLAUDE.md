@@ -94,6 +94,12 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   schedule() replaced the job that was just starting ("cancelled while waiting for bind").
   The debug journal is persisted (last 100 lines, with dates). Switch
   "Обновлять в фоне, даже если watchapp не открывали" (`backgroundRefresh`, default on).
+  Under it "Открывать watchapp после фонового обновления" (`openWatchappAfterRefresh`, default
+  off): after a background fetch, if the send says another app is open, `startAppOnTheWatch`.
+- "У меня есть Pebble" (`watchEnabled`, default on, Watchapp section): off = no sends, no
+  `Watches` provider, no watch row / watch settings; a watchapp request still gets an answer, but
+  only Status "Off in phone app" without a code (the watch keeps its stored code; silence would
+  show the download QR).
   Scheduled from `PickItUpApp.onCreate` and on every settings change; `schedule()` skips an
   identical pending job (re-scheduling resets the period) and never throws. Needs
   ACCESS_NETWORK_STATE (a missing one crashed the app at start) and RECEIVE_BOOT_COMPLETED.
@@ -187,6 +193,16 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   `prefetchBarcode` itself with `{}` (`shouldInterceptRequest`), stays alive `SETTLE_MS` = 8 s
   after the answer (background jobs wait too) and logs short SHA-256 prints of the tokens
   ("🔐 Login tokens: a → b") to the journal. LoginActivity is not affected.
+  1.5.1 hardening: cookies flushed after the answer / page load / pause, one hidden page at a time,
+  a Service Worker stub, `KeepAliveJob` (expedited job holds the process while a page lives, so a
+  swipe from Recents or the job ending doesn't kill it mid-rotation), pages retire at once when
+  the pair already rotated. Issue times inside Ozon tokens are in Ozon's TZ (1 h behind MSK).
+  Idle gaps are NOT the cause: the sniff-build `SessionProbe` (exact alarm after 6..48 h of
+  silence) found the session alive after every gap up to 48 h (2026-11-16).
+- `DebugLog` (debug screen -> share): detailed log, cookie values only as 4-hex prints, digit runs
+  masked; device state (Doze, network as the app sees it, bucket, saver), JobScheduler pending
+  reason, how the previous process ended, screens shown/hidden. Sniff builds mirror it to
+  `Android/data/com.grapie.pickitup/files/debug.log` (readable over adb).
 - VPN: no Ozon request while this app's own traffic goes through a VPN (`Net`, per-UID default
   network, so split tunneling that excludes PickItUp! is fine); `FetchResult.Vpn`, card on the main
   screen, watch status "VPN on phone". Off in the `sniff` build (`R.bool.vpn_guard`).

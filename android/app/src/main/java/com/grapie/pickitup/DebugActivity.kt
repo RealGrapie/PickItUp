@@ -126,11 +126,30 @@ class DebugActivity : BaseActivity() {
                 PillButton(s.refresh, R.drawable.ic_refresh, { BarcodeSync.refreshAndSend(this@DebugActivity) }, Modifier.weight(1f), tonal = true, enabled = !busy)
                 PillButton(s.send, R.drawable.ic_watch, { BarcodeSync.sendToWatchAsync(this@DebugActivity) }, Modifier.weight(1f), tonal = true)
             }
+            if (SessionProbe.available) {
+                // Sniff builds only (research): English, not in Strings.kt.
+                val probe by SessionProbe.state.collectAsStateWithLifecycle()
+                val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+                SectionCard("Session probe", R.drawable.ic_info) {
+                    Column(SectionInner, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Caption("One Ozon request after idle gaps of 6, 9, 12, 18, 24, 36, 48 h; nothing in between. Results go to the detailed log.")
+                        Text(probe, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
+                        if (SessionProbe.active) TextButton(onClick = { SessionProbe.stop(this@DebugActivity) }) { Text("Stop probe") }
+                        else TextButton(onClick = { SessionProbe.start(this@DebugActivity) }, enabled = loggedIn) { Text("Start probe") }
+                    }
+                }
+            }
             SectionCard(s.journal, R.drawable.ic_bug) {
                 Column(SectionInner, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (log.isEmpty()) Caption(s.empty)
                     log.asReversed().forEach {
                         Text(it, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    // Every request, cookie change and answer, without secrets: a file to send to the developer.
+                    TextButton(onClick = { DebugLog.share(this@DebugActivity) }) {
+                        Icon(painterResource(R.drawable.ic_share), null, Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text(s.shareDebugLog)
                     }
                     // A fork: logs get cleaned with a fork (Russian meme).
                     TextButton(onClick = { BarcodeStore.clearLog() }) {

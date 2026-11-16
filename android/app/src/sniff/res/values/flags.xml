@@ -2,4 +2,6 @@
 <resources>
     <!-- Reqable / HttpCanary capture through a local VPN. -->
     <bool name="vpn_guard">false</bool>
+    <bool name="webview_debug">true</bool>
+    <bool name="session_probe">true</bool>
 </resources>

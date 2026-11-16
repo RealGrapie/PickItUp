@@ -35,6 +35,10 @@ object BarcodeStore {
     val dailyMinutes = MutableStateFlow(RefreshSchedule.DEFAULT_DAILY_MINUTES)
     /** Also refresh on that schedule in the background ([RefreshJobService]). */
     val backgroundRefresh = MutableStateFlow(true)
+    /** After a background refresh the watchapp isn't open for: start it, so the new code lands on the watch. */
+    val openWatchappAfterRefresh = MutableStateFlow(false)
+    /** Off for people without a Pebble: no sends to the watch, no watch UI. */
+    val watchEnabled = MutableStateFlow(true)
     val log = MutableStateFlow<List<String>>(emptyList())
 
     fun init(context: Context) {
@@ -48,6 +52,8 @@ object BarcodeStore {
             .takeIf { it in RefreshSchedule.INTERVAL_OPTIONS } ?: RefreshSchedule.DEFAULT_INTERVAL_HOURS
         dailyMinutes.value = prefs.getInt("dailyMinutes", RefreshSchedule.DEFAULT_DAILY_MINUTES)
         backgroundRefresh.value = prefs.getBoolean("backgroundRefresh", true)
+        openWatchappAfterRefresh.value = prefs.getBoolean("openWatchappAfterRefresh", false)
+        watchEnabled.value = prefs.getBoolean("watchEnabled", true)
         barcode.value = code?.let {
             Barcode(it, prefs.getString("visible", it)!!, prefs.getLong("fetchedAt", 0))
         }
@@ -111,6 +117,17 @@ object BarcodeStore {
         backgroundRefresh.value = on
     }
 
+    fun setOpenWatchappAfterRefresh(on: Boolean) {
+        prefs.edit().putBoolean("openWatchappAfterRefresh", on).apply()
+        openWatchappAfterRefresh.value = on
+    }
+
+    fun setWatchEnabled(on: Boolean) {
+        prefs.edit().putBoolean("watchEnabled", on).apply()
+        watchEnabled.value = on
+        if (!on) watchStatus.value = WatchStatus.UNKNOWN
+    }
+
     fun setExitTimeout(seconds: Int) {
         prefs.edit().putInt("exitTimeout", seconds).apply()
         exitTimeout.value = seconds
@@ -125,11 +142,13 @@ object BarcodeStore {
     // With the date: the journal is kept across restarts (background runs start the app anew).
     private val fmt = SimpleDateFormat("dd.MM HH:mm:ss", Locale.US)
     fun log(msg: String) {
+        DebugLog.d("journal", msg)
         log.value = (log.value + "${fmt.format(Date())}  $msg").takeLast(100)
         prefs.edit().putString("journal", log.value.joinToString("\n")).apply()
     }
 
     fun clearLog() {
+        DebugLog.clear()
         log.value = emptyList()
         prefs.edit().remove("journal").apply()
     }

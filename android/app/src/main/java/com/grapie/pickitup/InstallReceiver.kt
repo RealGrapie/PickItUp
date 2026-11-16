@@ -14,7 +14,10 @@ class InstallReceiver : BroadcastReceiver() {
                 // First self-update, or "install unknown apps" not allowed yet: the system asks.
                 val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
                 if (confirm == null) Updater.onInstallEnded(status, "no confirmation intent")
-                else context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                // Android blocks activity starts from the background (the user left during the
+                // download): then the next screen of ours to resume shows it.
+                else if (BaseActivity.resumed > 0) context.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                else Updater.deferConfirm(confirm)
             }
             PackageInstaller.STATUS_SUCCESS -> Unit  // the new version replaces this process
             else -> Updater.onInstallEnded(status, intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE))

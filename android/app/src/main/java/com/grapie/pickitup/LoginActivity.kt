@@ -63,6 +63,10 @@ class LoginActivity : ComponentActivity() {
     companion object {
         const val EXTRA_URL = "url"
         const val ORDERS_URL = "https://www.ozon.ru/my/orderlist"
+
+        /** The site is open here: background fetches wait, two pages must not rotate one login pair. */
+        @Volatile private var openCount = 0
+        val isOpen get() = openCount > 0
         private val TITLE_SUFFIX = Regex("\\s*[-–—|]\\s*(OZON|Ozon|ozon\\.ru).*$")
 
         fun openPage(context: Context, url: String) =
@@ -72,6 +76,14 @@ class LoginActivity : ComponentActivity() {
     private lateinit var web: WebView
     private val handler = Handler(Looper.getMainLooper())
     private var finishing = false
+    private var counted = false
+    /** Login pair when the page opened: a change by closing time means the page rotated it. */
+    private var startPrint: String? = null
+
+    private fun uncount() {
+        if (counted) openCount--
+        counted = false
+    }
     private val host = mutableStateOf("ozon.ru")
     private val progress = mutableIntStateOf(0)
     private val pageTitle = mutableStateOf<String?>(null)
@@ -151,6 +163,9 @@ class LoginActivity : ComponentActivity() {
         if (!wasGuest && OzonClient.accessToken() == startToken) return
         finishing = true
         CookieManager.getInstance().flush()
+        DebugLog.tokens("site", "login detected, closing")
+        // A new login, not a lost rotation: the main screen refreshes before this page is gone.
+        OzonClient.noteLogin(this)
         // Now, not in onDestroy: that runs only after the main screen has resumed.
         BarcodeStore.setLoggedIn(true)
         setResult(RESULT_OK)
@@ -159,6 +174,9 @@ class LoginActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openCount++
+        counted = true
+        startPrint = OzonClient.currentPrint()
         web = WebView(this)
         OzonClient.configure(web)
         val pageUrl = intent.getStringExtra(EXTRA_URL)
@@ -174,7 +192,19 @@ class LoginActivity : ComponentActivity() {
                 return true
             }
 
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                if (request.url.host == "www.ozon.ru" && (request.isForMainFrame || request.url.path.orEmpty().startsWith("/api/")))
+                    DebugLog.d("site", "${request.method} ${DebugLog.url(request.url.toString())}${if (request.isForMainFrame) " (document)" else ""}")
+                return null
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: android.webkit.WebResourceResponse) {
+                if (request.url.host?.endsWith("ozon.ru") == true)
+                    DebugLog.d("site", "HTTP ${response.statusCode} ${request.method} ${DebugLog.url(request.url.toString())}")
+            }
+
             override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                DebugLog.d("site", "page started ${DebugLog.url(url)}")
                 loadFailed = false
                 showHost(url)
             }
@@ -200,6 +230,8 @@ class LoginActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String) {
+                // A rotated pair from this document load goes to disk at once (swipe from Recents kills us).
+                CookieManager.getInstance().flush()
                 if (loginMode) checkLoggedIn()
             }
 
@@ -219,6 +251,8 @@ class LoginActivity : ComponentActivity() {
                     ?.replace(TITLE_SUFFIX, "")?.trim()?.ifEmpty { null }
             }
         }
+        DebugLog.d("site", "opened, ${if (loginMode) "login" else "page " + DebugLog.url(pageUrl)}")
+        DebugLog.tokens("site", "tokens at open")
         if (loginMode) {
             wasGuest = !OzonClient.isLoggedIn()
             startToken = OzonClient.accessToken()
@@ -368,15 +402,39 @@ class LoginActivity : ComponentActivity() {
     }
 
     // Before the screen below resumes: the user may have logged in or out on any Ozon page.
+    override fun onStart() {
+        super.onStart()
+        BaseActivity.uiStarted()
+    }
+
+    override fun onStop() {
+        BaseActivity.uiStopped()
+        super.onStop()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        DebugLog.d("ui", "LoginActivity shown")
+    }
+
     override fun onPause() {
         super.onPause()
+        DebugLog.d("ui", "LoginActivity " + if (isFinishing) "closed" else "hidden")
+        // The process may be frozen or killed soon after: a pair the page rotated must be on disk.
+        CookieManager.getInstance().flush()
+        OzonClient.noteTokens()
         if (!finishing) BarcodeStore.setLoggedIn(OzonClient.isLoggedIn())
+        // The screen below may refresh as soon as it resumes (onDestroy comes later).
+        if (isFinishing) uncount()
     }
 
     override fun onDestroy() {
         runCatching { connectivity.unregisterNetworkCallback(network) }
         handler.removeCallbacksAndMessages(null)
-        web.destroy()
+        uncount()
+        DebugLog.tokens("site", "closed")
+        // Not destroyed at once: a request still in flight may bring a rotated login pair.
+        OzonClient.retire(web, startPrint)
         super.onDestroy()
     }
 }

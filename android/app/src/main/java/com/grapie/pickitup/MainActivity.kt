@@ -79,6 +79,8 @@ class MainActivity : BaseActivity() {
 
     override fun onStart() {
         super.onStart()
+        watching = BarcodeStore.watchEnabled.value
+        if (!watching) return
         Watches.watch(this)
         // Cold start: find out whether the watchapp is open (sending the stored code, no Ozon
         // request) instead of "Nothing sent yet". Not during a fetch: that would clear the
@@ -87,8 +89,12 @@ class MainActivity : BaseActivity() {
             BarcodeSync.sendToWatchAsync(this)
     }
 
+    /** Whether onStart called Watches.watch (the setting may change in between). */
+    private var watching = false
+
     override fun onStop() {
-        Watches.stop()
+        if (watching) Watches.stop()
+        watching = false
         super.onStop()
     }
 
@@ -220,6 +226,7 @@ class MainActivity : BaseActivity() {
         val vpn by Net.vpn.collectAsStateWithLifecycle()
         val connected by Watches.connected.collectAsStateWithLifecycle()
         val lastWatch by Watches.last.collectAsStateWithLifecycle()
+        val watchEnabled by BarcodeStore.watchEnabled.collectAsStateWithLifecycle()
         var fullscreen by remember { mutableStateOf(false) }
         // Ticks so "today" turns into "yesterday" at midnight without leaving the screen.
         val now by produceState(System.currentTimeMillis()) {
@@ -281,6 +288,7 @@ class MainActivity : BaseActivity() {
                                     }
                                 }
                             }
+                            if (watchEnabled) {
                             HorizontalDivider(Modifier.padding(start = 76.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
                             val watch = connected.firstOrNull() ?: lastWatch
                             val title = when {
@@ -305,6 +313,7 @@ class MainActivity : BaseActivity() {
                                         else -> MaterialTheme.colorScheme.error
                                     },
                                 )
+                            }
                             }
                         }
                     }

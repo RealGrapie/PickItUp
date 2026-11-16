@@ -34,6 +34,10 @@ object BarcodeSync {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val fetchLock = Mutex()
+    /** A watch REFRESH (UP) within this of the last fetch is answered from the cache: no new rotation. */
+    private const val FRESH_MS = 5 * 60_000L
+    /** Watch footer while "I have a Pebble" is off (ASCII, fits a 144 px line). */
+    private const val STATUS_WATCH_OFF = "Off in phone app"
 
     fun isStale(b: Barcode?) = b == null || RefreshSchedule.isStale(b.fetchedAt)
 
@@ -50,11 +54,22 @@ object BarcodeSync {
 
     /** Called when the watchapp asks: answer from cache at once, re-fetch if needed. */
     fun onWatchRequest(context: Context, kind: Int) = scope.launch {
+        if (!BarcodeStore.watchEnabled.value) {
+            // "I have a Pebble" is off: no code and no Ozon request, just a reason. Answering at all
+            // keeps the watch from showing the download QR; a code stored on it stays as it is.
+            DebugLog.d("watch", "request kind=$kind ignored: watch features off")
+            sendToWatch(context, STATUS_WATCH_OFF, force = true, withCode = false)
+            return@launch
+        }
         val cached = BarcodeStore.shown.value
-        val needFetch = kind == WatchKeys.REQUEST_REFRESH || isStale(cached)
+        val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAt < FRESH_MS
+        // With the Ozon site open in the app the cached code is shown; the site page owns the session.
+        val needFetch = (kind == WatchKeys.REQUEST_REFRESH && !fresh || isStale(cached)) && !LoginActivity.isOpen
+        DebugLog.d("watch", "request kind=$kind stale=${isStale(cached)} fresh=$fresh loginOpen=${LoginActivity.isOpen} -> fetch=$needFetch")
         // Always answer at once (even without a code): the watch treats ~5 s of silence as
         // "companion not installed" and shows the download QR.
-        sendToWatch(context, if (needFetch) "Updating..." else "")
+        // force: the watchapp asking proves there is a Pebble, whatever the setting says.
+        sendToWatch(context, if (needFetch) "Updating..." else "", force = true)
         if (!needFetch) return@launch
         val status = when (val r = refresh(context)) {
             is FetchResult.Ok -> ""
@@ -62,11 +77,12 @@ object BarcodeSync {
             FetchResult.Vpn -> "VPN on phone"
             is FetchResult.Error -> "Update failed"
         }
-        sendToWatch(context, status)
+        sendToWatch(context, status, force = true)
     }
 
     /** Starts the watchapp (e.g. another app is open); once open it asks for the code itself. */
     fun openWatchapp(context: Context) = scope.launch {
+        if (!BarcodeStore.watchEnabled.value) return@launch
         BarcodeStore.log(AppSettings.strings().logOpenWatchapp)
         val sender = DefaultPebbleSender(context.applicationContext)
         try {
@@ -101,9 +117,15 @@ object BarcodeSync {
             return@withLock FetchResult.Ok(BarcodeStore.shown.value!!)
         }
         if (!BarcodeStore.loggedIn.value) {
+            DebugLog.d("sync", "refresh skipped: logged out")
             // Not logged in: don't bother Ozon (it answers 500 for guests anyway).
             BarcodeStore.loginNeeded.value = true
             return@withLock FetchResult.LoginNeeded
+        }
+        if (LoginActivity.isOpen) {
+            // Two pages rotating one login pair at once: the cookie jar may keep the older new pair.
+            BarcodeStore.log(AppSettings.strings().logLoginOpen)
+            return@withLock FetchResult.Error(AppSettings.strings().logLoginOpen)
         }
         if (Net.vpnActive(context)) {
             // Ozon sees the VPN's address: a login from abroad may get ended. Split tunneling is fine.
@@ -120,6 +142,7 @@ object BarcodeSync {
         }
         // Chromium is loaded by now anyway; Ozon may have ended the session meanwhile.
         BarcodeStore.setLoggedIn(r is FetchResult.Ok || OzonClient.isLoggedIn())
+        SessionProbe.onFetch(context, r)
         when (r) {
             is FetchResult.Ok -> {
                 BarcodeStore.save(r.barcode)
@@ -137,10 +160,14 @@ object BarcodeSync {
         r
     }
 
-    suspend fun sendToWatch(context: Context, status: String = "") {
+    suspend fun sendToWatch(context: Context, status: String = "", force: Boolean = false, withCode: Boolean = true) {
+        // No Pebble (setting off): don't even bind to the Pebble app.
+        if (!force && !BarcodeStore.watchEnabled.value) return
         val b = BarcodeStore.shown.value
         val dict = buildMap {
-            if (b != null) {
+            if (!withCode) {
+                // Status only: the watch keeps whatever code it has stored.
+            } else if (b != null) {
                 put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
                 put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))
                 put(WatchKeys.UPDATED, PebbleDictionaryItem.Int32((b.fetchedAt / 1000).toInt()))

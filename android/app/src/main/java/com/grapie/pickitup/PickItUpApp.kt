@@ -5,11 +5,16 @@ import android.app.Application
 class PickItUpApp : Application() {
     override fun onCreate() {
         super.onCreate()
+        DebugLog.init(this)
+        DebugLog.d("app", "process start, version " + runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull())
+        DebugLog.lastExit(this)
+        if (resources.getBoolean(R.bool.webview_debug)) android.webkit.WebView.setWebContentsDebuggingEnabled(true)
         AppSettings.init(this)
         BarcodeStore.init(this)
         Watches.init(this)
         Updater.init(this)
         Net.init(this)
+        SessionProbe.init(this)
         RefreshJobService.schedule(this)
     }
 }

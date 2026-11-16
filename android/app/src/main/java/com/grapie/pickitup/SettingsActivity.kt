@@ -72,6 +72,7 @@ class SettingsActivity : BaseActivity() {
         val exitTimeout by BarcodeStore.exitTimeout.collectAsStateWithLifecycle()
         val refreshHours by BarcodeStore.refreshHours.collectAsStateWithLifecycle()
         val backgroundRefresh by BarcodeStore.backgroundRefresh.collectAsStateWithLifecycle()
+        val watchEnabled by BarcodeStore.watchEnabled.collectAsStateWithLifecycle()
         val refreshMode by BarcodeStore.refreshMode.collectAsStateWithLifecycle()
         val dailyMinutes by BarcodeStore.dailyMinutes.collectAsStateWithLifecycle()
         var showTimePicker by remember { mutableStateOf(false) }
@@ -115,21 +116,30 @@ class SettingsActivity : BaseActivity() {
                         Text(RefreshSchedule.formatTime(dailyMinutes), style = MaterialTheme.typography.titleMedium)
                     }
                 }
-                Caption(s.refreshHint, SectionInner)
-                SwitchRow(s.backgroundLabel, null, backgroundRefresh) {
+                if (watchEnabled) Caption(s.refreshHint, SectionInner)
+                SwitchRow(if (watchEnabled) s.backgroundLabel else s.backgroundLabelNoWatch, null, backgroundRefresh) {
                     BarcodeStore.setBackgroundRefresh(it)
                     RefreshJobService.schedule(this@SettingsActivity)
                 }
+                val openAfter by BarcodeStore.openWatchappAfterRefresh.collectAsStateWithLifecycle()
+                AnimatedVisibility(backgroundRefresh && watchEnabled) {
+                    SwitchRow(s.openAfterLabel, s.openAfterHint, openAfter, BarcodeStore::setOpenWatchappAfterRefresh)
+                }
             }
 
-            SectionCard(s.sectionPebble, R.drawable.ic_timer) {
-                Caption(s.exitTimeoutLabel, SectionInner)
-                Choices(
-                    listOf(0 to s.never, 30 to s.seconds(30), 60 to s.minutes(1), 120 to s.minutes(2), 300 to s.minutes(5)),
-                    exitTimeout, modifier = SectionInner,
-                ) {
-                    BarcodeStore.setExitTimeout(it)
-                    BarcodeSync.sendToWatchAsync(this@SettingsActivity)
+            SectionCard(s.sectionPebble, R.drawable.ic_watch) {
+                SwitchRow(s.watchEnabledLabel, s.watchEnabledHint, watchEnabled, BarcodeStore::setWatchEnabled)
+                AnimatedVisibility(watchEnabled) {
+                    Column {
+                        Caption(s.exitTimeoutLabel, SectionInner)
+                        Choices(
+                            listOf(0 to s.never, 30 to s.seconds(30), 60 to s.minutes(1), 120 to s.minutes(2), 300 to s.minutes(5)),
+                            exitTimeout, modifier = SectionInner,
+                        ) {
+                            BarcodeStore.setExitTimeout(it)
+                            BarcodeSync.sendToWatchAsync(this@SettingsActivity)
+                        }
+                    }
                 }
             }
 
