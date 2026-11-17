@@ -23,6 +23,10 @@ object WatchKeys {
     const val REQUEST = 10003u
     const val STATUS = 10004u
     const val TIMEOUT = 10005u
+    /** Several accounts: which one a message is about (0 = first), how many there are, its header line. */
+    const val INDEX = 10006u
+    const val COUNT = 10007u
+    const val NAME = 10008u
 
     const val REQUEST_CACHED = 1
     const val REQUEST_REFRESH = 2
@@ -59,8 +63,12 @@ object BarcodeSync {
         sendToWatch(context)
     }
 
-    /** Called when the watchapp asks: answer from cache at once, re-fetch if needed. */
-    fun onWatchRequest(context: Context, kind: Int) = scope.launch {
+    /**
+     * Called when the watchapp asks: answer from cache at once, re-fetch what's needed.
+     * CACHED = every stale account; REFRESH (UP) = the account shown on the watch ([index]; old
+     * watchapps send none and show the first one).
+     */
+    fun onWatchRequest(context: Context, kind: Int, index: Int? = null) = scope.launch {
         if (!BarcodeStore.watchEnabled.value) {
             // "I have a Pebble" is off: no code and no Ozon request, just a reason. Answering at all
             // keeps the watch from showing the download QR; a code stored on it stays as it is.
@@ -68,23 +76,32 @@ object BarcodeSync {
             sendToWatch(context, STATUS_WATCH_OFF, force = true, withCode = false)
             return@launch
         }
-        val cached = Accounts.active.shown.value
-        val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAt < FRESH_MS
-        // With the Ozon site open in the app the cached code is shown; the site page owns the session.
-        val needFetch = (kind == WatchKeys.REQUEST_REFRESH && !fresh || isStale(cached)) && !LoginActivity.isOpen
-        DebugLog.d("watch", "request kind=$kind stale=${isStale(cached)} fresh=$fresh loginOpen=${LoginActivity.isOpen} -> fetch=$needFetch")
+        val accounts = Accounts.list.value
+        val target = accounts.getOrNull(index ?: 0) ?: accounts.first()
+        // With the Ozon site open in the app the cached codes are shown; the site page owns the session.
+        val toFetch = if (LoginActivity.isOpen) emptyList() else accounts.filter { a ->
+            val cached = a.shown.value
+            val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAt < FRESH_MS
+            (a.loggedIn.value || BarcodeStore.demo.value) &&
+                (kind == WatchKeys.REQUEST_REFRESH && a == target && !fresh || isStale(cached))
+        }
+        DebugLog.d("watch", "request kind=$kind index=$index loginOpen=${LoginActivity.isOpen} -> fetch ${toFetch.map { accounts.indexOf(it) }}")
         // Always answer at once (even without a code): the watch treats ~5 s of silence as
         // "companion not installed" and shows the download QR.
         // force: the watchapp asking proves there is a Pebble, whatever the setting says.
-        sendToWatch(context, if (needFetch) "Updating..." else "", force = true)
-        if (!needFetch) return@launch
-        val status = when (val r = refresh(context)) {
-            is FetchResult.Ok -> ""
-            FetchResult.LoginNeeded -> "Log in on phone"
-            FetchResult.Vpn -> "VPN on phone"
-            is FetchResult.Error -> "Update failed"
+        val pending = toFetch.toMutableSet()
+        val results = mutableMapOf<Account, String>()
+        sendToWatch(context, { if (it in pending) "Updating..." else "" }, force = true)
+        for (a in toFetch) {
+            results[a] = when (refresh(context, a)) {
+                is FetchResult.Ok -> ""
+                FetchResult.LoginNeeded -> "Log in on phone"
+                FetchResult.Vpn -> "VPN on phone"
+                is FetchResult.Error -> "Update failed"
+            }
+            pending -= a
+            sendToWatch(context, { results[it] ?: if (it in pending) "Updating..." else "" }, force = true, only = a)
         }
-        sendToWatch(context, status, force = true)
     }
 
     /** Starts the watchapp (e.g. another app is open); once open it asks for the code itself. */
@@ -169,25 +186,63 @@ object BarcodeSync {
         r
     }
 
-    suspend fun sendToWatch(context: Context, status: String = "", force: Boolean = false, withCode: Boolean = true) {
+    /** Every account's code to the watch, or a status alone (one for all). */
+    suspend fun sendToWatch(context: Context, status: String = "", force: Boolean = false, withCode: Boolean = true) =
+        if (withCode) sendToWatch(context, { status }, force) else sendStatusOnly(context, status, force)
+
+    /**
+     * One message per account (or just [only]): index, count, header line, code, status. The first
+     * account goes last, so a watchapp from before multi-account (which overwrites its one code with
+     * every message) ends up with it.
+     */
+    suspend fun sendToWatch(context: Context, status: (Account) -> String, force: Boolean = false, only: Account? = null) {
         // No Pebble (setting off): don't even bind to the Pebble app.
         if (!force && !BarcodeStore.watchEnabled.value) return
-        val account = Accounts.active
-        val b = account.shown.value
-        val dict = buildMap {
-            if (!withCode) {
-                // Status only: the watch keeps whatever code it has stored.
-            } else if (b != null) {
-                put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
-                put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))
-                put(WatchKeys.UPDATED, PebbleDictionaryItem.Int32((b.fetchedAt / 1000).toInt()))
-            } else if (!account.loggedIn.value) {
-                // Logged out: an empty code makes the watch forget the one it stored.
-                put(WatchKeys.CODE, PebbleDictionaryItem.Text(""))
+        val accounts = Accounts.list.value
+        val sender = DefaultPebbleSender(context.applicationContext)
+        var res: Map<*, TransmissionResult>? = null
+        try {
+            for (i in accounts.indices.reversed()) {
+                val account = accounts[i]
+                if (only != null && account != only) continue
+                val b = account.shown.value
+                val st = status(account).ifEmpty { if (!account.loggedIn.value && !BarcodeStore.demo.value) "Log in on phone" else "" }
+                val dict = buildMap {
+                    put(WatchKeys.INDEX, PebbleDictionaryItem.Int32(i))
+                    put(WatchKeys.COUNT, PebbleDictionaryItem.Int32(accounts.size))
+                    put(WatchKeys.NAME, PebbleDictionaryItem.Text(WatchNames.label(account, i)))
+                    if (b != null) {
+                        put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
+                        put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))
+                        put(WatchKeys.UPDATED, PebbleDictionaryItem.Int32((b.fetchedAt / 1000).toInt()))
+                    } else if (!account.loggedIn.value) {
+                        // Logged out: an empty code makes the watch forget the one it stored.
+                        put(WatchKeys.CODE, PebbleDictionaryItem.Text(""))
+                    }
+                    put(WatchKeys.STATUS, PebbleDictionaryItem.Text(st))
+                    put(WatchKeys.TIMEOUT, PebbleDictionaryItem.Int32(BarcodeStore.exitTimeout.value))
+                }
+                res = sender.sendDataToPebble(WatchKeys.APP_UUID, dict)
+                // Not delivered (watch gone, other app open): the rest won't go either.
+                if (res?.values?.firstOrNull() != TransmissionResult.Success) break
             }
-            put(WatchKeys.STATUS, PebbleDictionaryItem.Text(status))
-            put(WatchKeys.TIMEOUT, PebbleDictionaryItem.Int32(BarcodeStore.exitTimeout.value))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "send failed", e); res = null
+        } finally {
+            closeQuietly(sender)
         }
+        noteResult(res)
+    }
+
+    /** Status only, for every account: the watch keeps whatever codes it has stored. */
+    private suspend fun sendStatusOnly(context: Context, status: String, force: Boolean) {
+        if (!force && !BarcodeStore.watchEnabled.value) return
+        val dict = mapOf(
+            WatchKeys.STATUS to PebbleDictionaryItem.Text(status),
+            WatchKeys.TIMEOUT to PebbleDictionaryItem.Int32(BarcodeStore.exitTimeout.value),
+        )
         val sender = DefaultPebbleSender(context.applicationContext)
         val res = try {
             sender.sendDataToPebble(WatchKeys.APP_UUID, dict)
@@ -198,6 +253,10 @@ object BarcodeSync {
         } finally {
             closeQuietly(sender)
         }
+        noteResult(res)
+    }
+
+    private fun noteResult(res: Map<*, TransmissionResult>?) {
         val r = res?.values?.firstOrNull()
         BarcodeStore.watchStatus.value = when {
             // Demo mode on a phone without the Pebble app (the emulator): screenshots show a delivery.

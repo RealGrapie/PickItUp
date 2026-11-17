@@ -7,7 +7,7 @@ aplite (Pebble/Steel, 144x168 B/W, 24 KB RAM), basalt (Time, 144x168 colour), ch
 to the watch.
 
 ```
-watch/src/c/   Pebble C watchapp (SDK 4.33.1)
+watch/src/c/   Pebble C watchapp (SDK 4.44)
   main.c       UI (barcode / rotated / QR test view, setup screens), AppMessage, persist, timers
   code128.c    Code 128 encoder (set B/C switching)
   qr.c         QR encoder: byte mode, level M v1-2 (26 bytes), level L v1-5 (106 bytes)
@@ -107,7 +107,7 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   identical pending job (re-scheduling resets the period) and never throws. Needs
   ACCESS_NETWORK_STATE (a missing one crashed the app at start) and RECEIVE_BOOT_COMPLETED.
   Test with `adb shell cmd jobscheduler run -f com.grapie.pickitup 1001`.
-- AppMessage keys: `Code`, `Visible`, `Updated`, `Request`, `Status`, `Timeout` — defined in both
+- AppMessage keys: `Code`, `Visible`, `Updated`, `Request`, `Status`, `Timeout`, `Index`, `Count`, `Name` — defined in both
   `watch/package.json` and `WatchKeys`; keep in sync. Status strings `Log in on phone`,
   `Updating...`, `Update failed` are shared between BarcodeSync and main.c. An empty `Code` (sent
   while logged out, e.g. right after logout) makes the watch delete its stored code. After
@@ -128,8 +128,14 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 - **Watch buttons**: SELECT cycles barcode -> QR (test; Ozon scans Code 128) -> rotated barcode
   (order via a `next[]` table; the persisted enum values are unchanged),
   long SELECT (0.6 s) opens the companion QR any time and only BACK closes it (SELECT does nothing
-  there; BACK elsewhere exits the app), UP forces a refresh, DOWN only resets the
-  auto-exit timer. View mode persists. The backlight is left to the system (user's choice).
+  there; BACK elsewhere exits the app), UP forces a refresh, DOWN shows the next account (several accounts; else it only resets the
+  auto-exit timer). View mode persists. The backlight is left to the system (user's choice).
+- **Several accounts on the watch**: the phone sends one message per account (`Index`, `Count`,
+  `Name` = header line, ASCII via `WatchNames`: "OZON: Mama"), the first account last so a
+  pre-multi-account watchapp keeps it. The watch keeps up to 4 (account 0 = the old persist keys,
+  others 100 + i*4 + field); with 2+ it opens on an accounts menu (MenuLayer), BACK from a code
+  returns there, UP refreshes the account shown (`Index` in the request). A status without
+  `Index` (e.g. "Off in phone app") is for all accounts.
 - **Auto-exit**: the watchapp closes after N s without button presses (`Timeout`, 0 = never,
   default 120 = 2 min on both sides, persisted on the watch); N is chosen in companion settings and sent with every reply.
   Off on setup/QR screens.
@@ -249,8 +255,8 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 # has no SDK). Write the commands into a script in watch/ with
 # `export PATH=/root/.local/bin:$PATH` and run: MSYS_NO_PATHCONV=1 wsl -d Ubuntu-24.04 -u root -- bash _b.sh
 pebble build                                  # -> build/watch.pbw, copy to ../pickitup.pbw
-# CI (.github/workflows/watchapp.yml): uv tool install pebble-tool==5.0.40 --python 3.13, then
-# `pebble sdk install 4.33.1 < /dev/null` - verified from an empty HOME in WSL; bump both together
+# CI (.github/workflows/watchapp.yml): uv tool install pebble-tool==5.2.0 --python 3.13, then
+# `pebble sdk install 4.44 < /dev/null` - verified from an empty HOME in WSL; bump both together
 DEMO=1 pebble build                           # emulator demo: sample code "12345678*9012", no auto-exit
 pebble install --emulator flint               # some platforms need SELECT x2 to open the app
 pebble screenshot --emulator flint --no-open x.png

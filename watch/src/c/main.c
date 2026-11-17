@@ -45,10 +45,40 @@
 static Window *s_window;
 static Layer *s_canvas;
 
-static char s_code[CODE128_MAX_CHARS + 1];
-static char s_visible[48];
-static char s_status[48];
-static time_t s_updated;
+// Several accounts (family): each has its own code; one is shown at a time. The first one keeps
+// the persist keys of the single-account versions, so an update needs no migration.
+#define MAX_ACCOUNTS 4
+#define PERSIST_COUNT 7
+#define PERSIST_CURRENT 8
+#define PERSIST_NAME0 9
+typedef struct {
+  char code[CODE128_MAX_CHARS + 1];
+  char visible[24];
+  char name[20];    // header line from the phone, e.g. "OZON: Mama"
+  char status[24];  // footer override: "Updating...", "Log in on phone"...
+  time_t updated;
+} Account;
+static Account s_acc[MAX_ACCOUNTS];
+static int s_count = 1;
+static int s_cur;
+// The rest of the file works on the account shown.
+#define s_code (s_acc[s_cur].code)
+#define s_visible (s_acc[s_cur].visible)
+#define s_status (s_acc[s_cur].status)
+#define s_updated (s_acc[s_cur].updated)
+
+enum { F_CODE, F_VISIBLE, F_UPDATED, F_NAME };
+static uint32_t pkey(int i, int field) {
+  if (i == 0) {
+    static const uint32_t first[] = { PERSIST_CODE, PERSIST_VISIBLE, PERSIST_UPDATED, PERSIST_NAME0 };
+    return first[field];
+  }
+  return 100 + i * 4 + field;
+}
+
+static Window *s_menu_window;
+static MenuLayer *s_menu;
+
 typedef enum { MODE_BARS, MODE_VERTICAL, MODE_QR, MODE_COUNT } ViewMode;
 static ViewMode s_mode;
 static int s_timeout_s = DEFAULT_TIMEOUT_S;
@@ -73,20 +103,45 @@ static void encode(void) {
 }
 
 static void load_state(void) {
-  persist_read_string(PERSIST_CODE, s_code, sizeof(s_code));
-  persist_read_string(PERSIST_VISIBLE, s_visible, sizeof(s_visible));
-  s_updated = persist_read_int(PERSIST_UPDATED);
+  if (persist_exists(PERSIST_COUNT)) s_count = persist_read_int(PERSIST_COUNT);
+  if (s_count < 1 || s_count > MAX_ACCOUNTS) s_count = 1;
+  for (int i = 0; i < s_count; i++) {
+    Account *a = &s_acc[i];
+    persist_read_string(pkey(i, F_CODE), a->code, sizeof(a->code));
+    persist_read_string(pkey(i, F_VISIBLE), a->visible, sizeof(a->visible));
+    persist_read_string(pkey(i, F_NAME), a->name, sizeof(a->name));
+    a->updated = persist_read_int(pkey(i, F_UPDATED));
+  }
+  s_cur = persist_read_int(PERSIST_CURRENT);
+  if (s_cur < 0 || s_cur >= s_count) s_cur = 0;
   if (persist_exists(PERSIST_TIMEOUT)) s_timeout_s = persist_read_int(PERSIST_TIMEOUT);
   s_mode = persist_read_int(PERSIST_MODE) % MODE_COUNT;  // 0 (barcode) when not stored yet
 #ifdef DEMO
   s_timeout_s = 0;  // emulator demos stay open
-  if (!s_code[0]) {
-    strcpy(s_code, "12345678*9012");
-    strcpy(s_visible, "1234 5678 * 9012");
-    s_updated = time(NULL) - 3 * 3600;
+  if (!s_acc[0].code[0]) {
+    s_count = 2;
+    static const char *demo[2][3] = { { "12345678*9012", "1234 5678 * 9012", "OZON: Me" },
+                                      { "87654321*0987", "8765 4321 * 0987", "OZON: Family" } };
+    for (int i = 0; i < 2; i++) {
+      strcpy(s_acc[i].code, demo[i][0]);
+      strcpy(s_acc[i].visible, demo[i][1]);
+      strcpy(s_acc[i].name, demo[i][2]);
+      s_acc[i].updated = time(NULL) - (3 + 20 * i) * 3600;
+    }
   }
 #endif
   encode();
+}
+
+static void select_account(int i) {
+  s_cur = i;
+  persist_write_int(PERSIST_CURRENT, s_cur);
+  encode();
+}
+
+// Header over the code: the account's name once there are several.
+static const char *header_text(void) {
+  return s_count > 1 && s_acc[s_cur].name[0] ? s_acc[s_cur].name : "OZON pickup code";
 }
 
 static void draw_text(GContext *ctx, const char *text, const char *font, GRect box) {
@@ -202,6 +257,8 @@ static void draw_setup(GContext *ctx, GRect b) {
     }
     if (title) {
       int mx = PBL_IF_ROUND_ELSE(b.size.w / 8, 6);
+      // Several accounts: whose screen this is.
+      if (s_count > 1) draw_text(ctx, header_text(), title_font, PBL_IF_ROUND_ELSE(band(b, 8, 20), GRect(0, 0, b.size.w, 24)));
       draw_text(ctx, title, big ? FONT_KEY_GOTHIC_28_BOLD : FONT_KEY_GOTHIC_24_BOLD,
                 GRect(mx, b.size.h / 2 - 50, b.size.w - 2 * mx, 64));
       draw_text(ctx, text, big ? FONT_KEY_GOTHIC_24 : FONT_KEY_GOTHIC_18,
@@ -256,19 +313,19 @@ static Layout layout_for(GRect b) {
 }
 
 // "upd today 14:05" while the code is from today, "outdated" from yesterday on.
-static void footer_text(char *out, size_t n) {
-  if (s_status[0]) {
-    snprintf(out, n, "%s", s_status);
+static void account_footer(const Account *a, char *out, size_t n) {
+  if (a->status[0]) {
+    snprintf(out, n, "%s", a->status);
     return;
   }
-  if (!s_updated) {
+  if (!a->updated) {
     out[0] = '\0';
     return;
   }
   // Offline the code still works (it's stored on the watch); just say it may not be fresh.
   const char *offline = connection_service_peek_pebble_app_connection() ? "" : "offline, ";
   time_t now = time(NULL);
-  struct tm upd = *localtime(&s_updated);
+  struct tm upd = *localtime(&a->updated);
   struct tm today = *localtime(&now);
   if (upd.tm_year == today.tm_year && upd.tm_yday == today.tm_yday) {
     char when[8];
@@ -278,6 +335,8 @@ static void footer_text(char *out, size_t n) {
     snprintf(out, n, "%soutdated", offline);
   }
 }
+
+static void footer_text(char *out, size_t n) { account_footer(&s_acc[s_cur], out, n); }
 
 static GColor header_bg(void) { return PBL_IF_COLOR_ELSE(GColorBlueMoon, GColorWhite); }
 static GColor header_fg(void) { return PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack); }
@@ -291,7 +350,7 @@ static void draw_frame_texts(GContext *ctx, const Layout *l, bool big) {
   graphics_context_set_fill_color(ctx, header_bg());
   graphics_fill_rect(ctx, l->header, 0, GCornerNone);
   graphics_context_set_text_color(ctx, header_fg());
-  draw_text(ctx, "OZON pickup code", title_font(big), l->title);
+  draw_text(ctx, header_text(), title_font(big), l->title);
   graphics_context_set_fill_color(ctx, GColorBlack);
   graphics_context_set_text_color(ctx, GColorBlack);
   draw_text(ctx, s_visible[0] ? s_visible : s_code, code_font(big), l->code);
@@ -389,7 +448,7 @@ static void draw_rotated(GContext *ctx, GRect b) {
   footer_text(foot, sizeof(foot));
 
   TextStrip strips[3];
-  render_strip(ctx, b, &strips[0], "OZON pickup code", title_font(big), l.title, header_bg(), header_fg());
+  render_strip(ctx, b, &strips[0], header_text(), title_font(big), l.title, header_bg(), header_fg());
   render_strip(ctx, b, &strips[1], s_visible[0] ? s_visible : s_code, code_font(big), l.code, GColorWhite, GColorBlack);
   render_strip(ctx, b, &strips[2], foot, foot_font(big), l.footer, GColorWhite, GColorBlack);
 
@@ -439,9 +498,19 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   }
 }
 
+
+// The barcode window and the accounts menu, whichever exist right now.
+static void redraw(void) {
+  if (s_canvas) layer_mark_dirty(s_canvas);
+  if (s_menu) menu_layer_reload_data(s_menu);
+}
+
 // Replaces a pending "Updating..." so it never hangs when the phone is gone.
 static void clear_updating(const char *reason) {
-  if (strcmp(s_status, STATUS_UPDATING) == 0) snprintf(s_status, sizeof(s_status), "%s", reason);
+  for (int i = 0; i < MAX_ACCOUNTS; i++) {
+    char *st = s_acc[i].status;
+    if (strcmp(st, STATUS_UPDATING) == 0) snprintf(st, sizeof(s_acc[i].status), "%s", reason);
+  }
 }
 
 static void answer_timeout(void *data) {
@@ -449,7 +518,7 @@ static void answer_timeout(void *data) {
   if (s_phone == PHONE_WAITING) {
     s_phone = PHONE_SILENT;
     clear_updating(connection_service_peek_pebble_app_connection() ? STATUS_NO_ANSWER : STATUS_OFFLINE);
-    layer_mark_dirty(s_canvas);
+    redraw();
   }
 }
 
@@ -457,7 +526,7 @@ static void answer_timeout(void *data) {
 static void fetch_timeout(void *data) {
   s_fetch_timer = NULL;
   clear_updating(connection_service_peek_pebble_app_connection() ? STATUS_NO_ANSWER : STATUS_OFFLINE);
-  layer_mark_dirty(s_canvas);
+  redraw();
 }
 
 static int s_request_kind;
@@ -472,6 +541,7 @@ static void send_request(void *data) {
     return;
   }
   dict_write_int32(it, MESSAGE_KEY_Request, s_request_kind);
+  dict_write_int32(it, MESSAGE_KEY_Index, s_cur);  // which code UP refreshes
   app_message_outbox_send();
 }
 
@@ -502,51 +572,89 @@ static void exit_app(void *data) {
 static void restart_exit_timer(void) {
   if (s_exit_timer) app_timer_cancel(s_exit_timer);
   // No auto-exit while setting up: installing the app and logging in takes a while.
-  bool setup = s_show_setup || !s_nwidths;
+  bool setup = s_show_setup || (!s_nwidths && s_canvas);  // s_canvas: the code window is up
   s_exit_timer = s_timeout_s > 0 && !setup ? app_timer_register(s_timeout_s * 1000, exit_app, NULL) : NULL;
 }
 
+static void copy_string(char *dst, size_t n, const Tuple *t) {
+  strncpy(dst, t->value->cstring, n - 1);
+  dst[n - 1] = '\0';
+}
+
+// One message = one account (Index; none from phone apps before multi-account = the first one).
+// A status without Index is for all of them (e.g. "Off in phone app").
 static void inbox_received(DictionaryIterator *it, void *context) {
   Tuple *t;
   bool too_long = false;
   s_phone = PHONE_ANSWERED;
+  int i = 0;
+  bool indexed = false;
+  if ((t = dict_find(it, MESSAGE_KEY_Index))) {
+    i = t->value->int32;
+    indexed = true;
+    if (i < 0 || i >= MAX_ACCOUNTS) return;  // more accounts than the watch keeps
+  }
+  if ((t = dict_find(it, MESSAGE_KEY_Count))) {
+    int count = t->value->int32;
+    if (count > MAX_ACCOUNTS) count = MAX_ACCOUNTS;
+    if (count >= 1 && count != s_count) {
+      // Accounts removed on the phone: forget their codes.
+      for (int k = count; k < s_count; k++) {
+        for (int f = F_CODE; f <= F_NAME; f++) persist_delete(pkey(k, f));
+        memset(&s_acc[k], 0, sizeof(s_acc[k]));
+      }
+      s_count = count;
+      persist_write_int(PERSIST_COUNT, s_count);
+      if (s_cur >= s_count) select_account(0);
+    }
+  }
+  Account *a = &s_acc[i];
+  bool shown = i == s_cur;
+  if ((t = dict_find(it, MESSAGE_KEY_Name)) && t->type == TUPLE_CSTRING) {
+    copy_string(a->name, sizeof(a->name), t);
+    persist_write_string(pkey(i, F_NAME), a->name);
+  }
   if ((t = dict_find(it, MESSAGE_KEY_Code)) && t->type == TUPLE_CSTRING && t->length <= 1) {
     // Empty code = logged out on the phone: forget the stored one, back to the setup screens.
-    s_code[0] = s_visible[0] = '\0';
-    s_nwidths = 0;
-    s_updated = 0;
-    persist_delete(PERSIST_CODE);
-    persist_delete(PERSIST_VISIBLE);
-    persist_delete(PERSIST_UPDATED);
-    restart_exit_timer();
+    a->code[0] = a->visible[0] = '\0';
+    a->updated = 0;
+    persist_delete(pkey(i, F_CODE));
+    persist_delete(pkey(i, F_VISIBLE));
+    persist_delete(pkey(i, F_UPDATED));
+    if (shown) {
+      s_nwidths = 0;
+      restart_exit_timer();
+    }
   } else if (t && t->type == TUPLE_CSTRING && t->length - 1 > CODE128_MAX_CHARS) {
     // Cut short it would still scan, as a wrong code: keep the stored one and say so.
     too_long = true;
   } else if (t && t->type == TUPLE_CSTRING) {
-    bool first = !s_nwidths;
-    strncpy(s_code, t->value->cstring, sizeof(s_code) - 1);
-    s_code[sizeof(s_code) - 1] = '\0';
-    persist_write_string(PERSIST_CODE, s_code);
-    encode();
-    if (first) restart_exit_timer();  // leaving the setup screens arms the auto-exit
+    copy_string(a->code, sizeof(a->code), t);
+    persist_write_string(pkey(i, F_CODE), a->code);
+    if (shown) {
+      bool first = !s_nwidths;
+      encode();
+      if (first) restart_exit_timer();  // leaving the setup screens arms the auto-exit
+    }
   }
   if (!too_long && (t = dict_find(it, MESSAGE_KEY_Visible)) && t->type == TUPLE_CSTRING) {
-    strncpy(s_visible, t->value->cstring, sizeof(s_visible) - 1);
-    s_visible[sizeof(s_visible) - 1] = '\0';
-    persist_write_string(PERSIST_VISIBLE, s_visible);
+    copy_string(a->visible, sizeof(a->visible), t);
+    persist_write_string(pkey(i, F_VISIBLE), a->visible);
   }
   if (!too_long && (t = dict_find(it, MESSAGE_KEY_Updated))) {
-    s_updated = (time_t)t->value->int32;
-    persist_write_int(PERSIST_UPDATED, (int32_t)s_updated);
+    a->updated = (time_t)t->value->int32;
+    persist_write_int(pkey(i, F_UPDATED), (int32_t)a->updated);
   }
   if ((t = dict_find(it, MESSAGE_KEY_Status)) && t->type == TUPLE_CSTRING) {
-    strncpy(s_status, t->value->cstring, sizeof(s_status) - 1);
-    s_status[sizeof(s_status) - 1] = '\0';
+    for (int k = 0; k < MAX_ACCOUNTS; k++) {
+      if (indexed ? k == i : true) copy_string(s_acc[k].status, sizeof(s_acc[k].status), t);
+    }
+    bool updating = false;
+    for (int k = 0; k < s_count; k++) updating |= strcmp(s_acc[k].status, STATUS_UPDATING) == 0;
     if (s_fetch_timer) app_timer_cancel(s_fetch_timer);
-    s_fetch_timer = strcmp(s_status, STATUS_UPDATING) == 0
-        ? app_timer_register(PHONE_FETCH_TIMEOUT_MS, fetch_timeout, NULL) : NULL;
+    s_fetch_timer = updating ? app_timer_register(PHONE_FETCH_TIMEOUT_MS, fetch_timeout, NULL) : NULL;
   }
-  if (too_long) snprintf(s_status, sizeof(s_status), STATUS_TOO_LONG);
+  if (too_long) snprintf(a->status, sizeof(a->status), STATUS_TOO_LONG);
   if ((t = dict_find(it, MESSAGE_KEY_Timeout))) {
     int timeout = t->value->int32;
     if (timeout != s_timeout_s) {
@@ -555,7 +663,7 @@ static void inbox_received(DictionaryIterator *it, void *context) {
       restart_exit_timer();
     }
   }
-  layer_mark_dirty(s_canvas);
+  redraw();
 }
 
 static void select_click(ClickRecognizerRef recognizer, void *context) {
@@ -569,13 +677,13 @@ static void select_click(ClickRecognizerRef recognizer, void *context) {
     persist_write_int(PERSIST_MODE, s_mode);
   }
   restart_exit_timer();
-  layer_mark_dirty(s_canvas);
+  redraw();
 }
 
 static void select_long_click(ClickRecognizerRef recognizer, void *context) {
   s_show_setup = true;
   restart_exit_timer();
-  layer_mark_dirty(s_canvas);
+  redraw();
 }
 
 static void up_click(ClickRecognizerRef recognizer, void *context) {
@@ -588,21 +696,28 @@ static void up_click(ClickRecognizerRef recognizer, void *context) {
     snprintf(s_status, sizeof(s_status), STATUS_UPDATING);
     request_from_phone(REQUEST_REFRESH);
   }
-  layer_mark_dirty(s_canvas);
+  redraw();
 }
 
+// DOWN: the next account's code (several accounts); otherwise it only keeps the app open.
 static void down_click(ClickRecognizerRef recognizer, void *context) {
+  if (s_count > 1 && !s_show_setup) {
+    select_account((s_cur + 1) % s_count);
+    if (s_menu) menu_layer_set_selected_index(s_menu, MenuIndex(0, s_cur), MenuRowAlignCenter, false);
+  }
   restart_exit_timer();
+  redraw();
 }
 
-// BACK closes the companion QR opened with long SELECT; otherwise it leaves the app as usual.
+// BACK closes the companion QR opened with long SELECT; otherwise back to the accounts menu, or
+// out of the app.
 static void back_click(ClickRecognizerRef recognizer, void *context) {
   if (s_show_setup) {
     s_show_setup = false;
     restart_exit_timer();
-    layer_mark_dirty(s_canvas);
+    redraw();
   } else {
-    window_stack_pop_all(true);
+    window_stack_pop(true);
   }
 }
 
@@ -616,12 +731,14 @@ static void click_config(void *context) {
 
 static void phone_connection(bool connected) {
   if (connected) {
-    if (strcmp(s_status, STATUS_OFFLINE) == 0) s_status[0] = '\0';
+    for (int i = 0; i < MAX_ACCOUNTS; i++) {
+      if (strcmp(s_acc[i].status, STATUS_OFFLINE) == 0) s_acc[i].status[0] = '\0';
+    }
     request_from_phone(REQUEST_CACHED);  // ask again once the phone is back
   } else {
     clear_updating(STATUS_OFFLINE);
   }
-  layer_mark_dirty(s_canvas);
+  redraw();
 }
 
 static void window_load(Window *window) {
@@ -634,6 +751,54 @@ static void window_load(Window *window) {
 
 static void window_unload(Window *window) {
   layer_destroy(s_canvas);
+  s_canvas = NULL;
+}
+
+// ---- Accounts menu: shown first when there are several; a row opens that account's code.
+
+static uint16_t menu_rows(MenuLayer *menu, uint16_t section, void *data) { return s_count; }
+
+static void menu_draw_row(GContext *ctx, const Layer *cell, MenuIndex *idx, void *data) {
+  const Account *a = &s_acc[idx->row];
+  char title[24], sub[32];
+  if (a->name[0]) snprintf(title, sizeof(title), "%s", a->name);
+  else snprintf(title, sizeof(title), "Account %d", idx->row + 1);
+  if (a->code[0]) account_footer(a, sub, sizeof(sub));
+  else snprintf(sub, sizeof(sub), "%s", a->status[0] ? a->status : "No barcode yet");
+  menu_cell_basic_draw(ctx, cell, title, sub, NULL);
+}
+
+static void menu_select(MenuLayer *menu, MenuIndex *idx, void *data) {
+  select_account(idx->row);
+  restart_exit_timer();
+  window_stack_push(s_window, true);
+}
+
+static void menu_changed(MenuLayer *menu, MenuIndex new_index, MenuIndex old_index, void *data) {
+  restart_exit_timer();
+}
+
+static void menu_load(Window *window) {
+  Layer *root = window_get_root_layer(window);
+  s_menu = menu_layer_create(layer_get_bounds(root));
+  menu_layer_set_callbacks(s_menu, NULL, (MenuLayerCallbacks){
+    .get_num_rows = menu_rows,
+    .draw_row = menu_draw_row,
+    .select_click = menu_select,
+    .selection_changed = menu_changed,
+  });
+#ifdef PBL_COLOR
+  menu_layer_set_highlight_colors(s_menu, header_bg(), header_fg());
+#endif
+  menu_layer_set_click_config_onto_window(s_menu, window);
+  menu_layer_set_selected_index(s_menu, MenuIndex(0, s_cur), MenuRowAlignCenter, false);
+  layer_add_child(root, menu_layer_get_layer(s_menu));
+  restart_exit_timer();
+}
+
+static void menu_unload(Window *window) {
+  menu_layer_destroy(s_menu);
+  s_menu = NULL;
 }
 
 static void init(void) {
@@ -646,7 +811,17 @@ static void init(void) {
     .load = window_load,
     .unload = window_unload,
   });
-  window_stack_push(s_window, true);
+  if (s_count > 1) {
+    // Several accounts: pick one first; BACK from its code comes back here.
+    s_menu_window = window_create();
+    window_set_window_handlers(s_menu_window, (WindowHandlers){
+      .load = menu_load,
+      .unload = menu_unload,
+    });
+    window_stack_push(s_menu_window, true);
+  } else {
+    window_stack_push(s_window, true);
+  }
 
   app_message_register_inbox_received(inbox_received);
   app_message_register_outbox_failed(outbox_failed);
@@ -657,6 +832,7 @@ static void init(void) {
 
 static void deinit(void) {
   window_destroy(s_window);
+  if (s_menu_window) window_destroy(s_menu_window);
 }
 
 int main(void) {

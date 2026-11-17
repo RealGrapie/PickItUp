@@ -68,6 +68,15 @@ def run(demo):
                 im, r = shot(p, f"{p}_{i}")
                 out.append(r)
             press(p)  # back to the normal view for the next run
+            # Two demo accounts: DOWN shows the second code, BACK the accounts menu.
+            press(p, "down")
+            im, r = shot(p, f"{p}_3")
+            out.append(r)
+            press(p, "back")
+            shot(p, f"{p}_menu")
+            press(p, "up")  # first account selected again for the next run
+            press(p)
+            press(p, "back")
             report[p] = out
         else:
             time.sleep(6)

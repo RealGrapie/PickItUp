@@ -261,8 +261,8 @@ class SettingsActivity : BaseActivity() {
                         a.clear()
                         a.loginNeeded.value = true
                         BarcodeStore.log(s.logLoggedOut + " (" + a.label() + ")")
-                        // The watch shows the first account: if the watchapp is open it forgets the code now.
-                        if (a == Accounts.active) BarcodeSync.sendToWatchAsync(this@SettingsActivity)
+                        // If the watchapp is open it forgets the code now, else on its next request.
+                        BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.logoutConfirm, color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = { TextButton(onClick = { confirmLogout = null }) { Text(s.cancel) } },
@@ -278,10 +278,9 @@ class SettingsActivity : BaseActivity() {
                 confirmButton = {
                     TextButton(onClick = {
                         confirmRemove = null
-                        val wasFirst = a == Accounts.active
                         Accounts.remove(a)
                         BarcodeStore.log(s.removeAccount + ": " + a.label())
-                        if (wasFirst) BarcodeSync.sendToWatchAsync(this@SettingsActivity)
+                        BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.removeAccountConfirm, color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text(s.cancel) } },

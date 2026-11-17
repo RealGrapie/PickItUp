@@ -18,7 +18,8 @@ class WatchListenerService : BasePebbleListenerService() {
         val kind = (request.value as? Number)?.toInt() ?: WatchKeys.REQUEST_CACHED
         val s = AppSettings.strings()
         BarcodeStore.log(if (kind == WatchKeys.REQUEST_REFRESH) s.logWatchAskedRefresh else s.logWatchAsked)
-        BarcodeSync.onWatchRequest(this, kind)
+        val index = (data[WatchKeys.INDEX]?.value as? Number)?.toInt()
+        BarcodeSync.onWatchRequest(this, kind, index)
         return ReceiveResult.Ack
     }
 }

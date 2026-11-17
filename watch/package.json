@@ -30,7 +30,10 @@
       "Updated": 10002,
       "Request": 10003,
       "Status": 10004,
-      "Timeout": 10005
+      "Timeout": 10005,
+      "Index": 10006,
+      "Count": 10007,
+      "Name": 10008
     },
     "companionApp": {
       "android": {
