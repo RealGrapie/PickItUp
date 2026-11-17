@@ -79,9 +79,9 @@ class DebugActivity : BaseActivity() {
     @Composable
     private fun DebugScreen(onBack: () -> Unit) {
         val s = LocalStrings.current
-        val barcode by BarcodeStore.barcode.collectAsStateWithLifecycle()
-        val busy by BarcodeStore.busy.collectAsStateWithLifecycle()
-        val loginNeeded by BarcodeStore.loginNeeded.collectAsStateWithLifecycle()
+        val barcode by Accounts.active.barcode.collectAsStateWithLifecycle()
+        val busy by Accounts.active.busy.collectAsStateWithLifecycle()
+        val loginNeeded by Accounts.active.loginNeeded.collectAsStateWithLifecycle()
         val watchStatus by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
         val exitTimeout by BarcodeStore.exitTimeout.collectAsStateWithLifecycle()
         val connected by Watches.connected.collectAsStateWithLifecycle()
@@ -101,7 +101,7 @@ class DebugActivity : BaseActivity() {
             }
             SectionCard(s.sectionState, R.drawable.ic_info) {
                 // From Ozon's session cookie (as last read), so it's known before the first request.
-                val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+                val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
                 InfoRow(s.stateLogin, if (loggedIn) s.loginOkValue else s.loginNeededValue)
                 InfoRow(s.stateFetchedAt, barcode?.let { fmt.format(Date(it.fetchedAt)) } ?: "—")
                 val refreshHours by BarcodeStore.refreshHours.collectAsStateWithLifecycle()
@@ -129,7 +129,7 @@ class DebugActivity : BaseActivity() {
             if (SessionProbe.available) {
                 // Sniff builds only (research): English, not in Strings.kt.
                 val probe by SessionProbe.state.collectAsStateWithLifecycle()
-                val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+                val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
                 SectionCard("Session probe", R.drawable.ic_info) {
                     Column(SectionInner, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Caption("One Ozon request after idle gaps of 6, 9, 12, 18, 24, 36, 48 h; nothing in between. Results go to the detailed log.")

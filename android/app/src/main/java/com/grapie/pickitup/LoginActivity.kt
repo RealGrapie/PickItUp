@@ -8,7 +8,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.webkit.CookieManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
@@ -56,24 +55,29 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 /**
- * Ozon's own site in a WebView: the login page (the cookies it leaves behind are what
- * [OzonClient] uses) or, with [EXTRA_URL], any page such as the order list.
+ * An account's marketplace site in a WebView, in that account's own profile: the login page (the
+ * cookies it leaves behind are what its client uses) or, with [EXTRA_URL], any page such as the
+ * order list. [EXTRA_ACCOUNT] names the account (none = the active one).
  */
 class LoginActivity : ComponentActivity() {
     companion object {
         const val EXTRA_URL = "url"
-        const val ORDERS_URL = "https://www.ozon.ru/my/orderlist"
+        const val EXTRA_ACCOUNT = "account"
 
         /** The site is open here: background fetches wait, two pages must not rotate one login pair. */
         @Volatile private var openCount = 0
         val isOpen get() = openCount > 0
         private val TITLE_SUFFIX = Regex("\\s*[-–—|]\\s*(OZON|Ozon|ozon\\.ru).*$")
 
-        fun openPage(context: Context, url: String) =
-            context.startActivity(Intent(context, LoginActivity::class.java).putExtra(EXTRA_URL, url))
+        fun loginIntent(context: Context, account: Account): Intent =
+            Intent(context, LoginActivity::class.java).putExtra(EXTRA_ACCOUNT, account.id)
+
+        fun openPage(context: Context, account: Account, url: String) =
+            context.startActivity(loginIntent(context, account).putExtra(EXTRA_URL, url))
     }
 
     private lateinit var web: WebView
+    private lateinit var account: Account
     private val handler = Handler(Looper.getMainLooper())
     private var finishing = false
     private var counted = false
@@ -159,26 +163,27 @@ class LoginActivity : ComponentActivity() {
     }
 
     private fun checkLoggedIn() {
-        if (finishing || !OzonClient.isLoggedIn()) return
-        if (!wasGuest && OzonClient.accessToken() == startToken) return
+        if (finishing || !OzonClient.isLoggedIn(account)) return
+        if (!wasGuest && OzonClient.accessToken(account) == startToken) return
         finishing = true
-        CookieManager.getInstance().flush()
-        DebugLog.tokens("site", "login detected, closing")
+        WebProfiles.cookies(account.profile).flush()
+        DebugLog.tokens("site", "login detected, closing", account)
         // A new login, not a lost rotation: the main screen refreshes before this page is gone.
-        OzonClient.noteLogin(this)
+        OzonClient.noteLogin(account)
         // Now, not in onDestroy: that runs only after the main screen has resumed.
-        BarcodeStore.setLoggedIn(true)
+        account.setLoggedIn(true)
         setResult(RESULT_OK)
         finish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        account = Accounts.byId(intent.getStringExtra(EXTRA_ACCOUNT)) ?: Accounts.active
         openCount++
         counted = true
-        startPrint = OzonClient.currentPrint()
-        web = WebView(this)
-        OzonClient.configure(web)
+        startPrint = OzonClient.currentPrint(account)
+        web = WebView(this).also { WebProfiles.apply(it, account.profile) }
+        OzonClient.configure(web, account)
         val pageUrl = intent.getStringExtra(EXTRA_URL)
         val loginMode = pageUrl == null
         web.webViewClient = object : WebViewClient() {
@@ -231,7 +236,7 @@ class LoginActivity : ComponentActivity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 // A rotated pair from this document load goes to disk at once (swipe from Recents kills us).
-                CookieManager.getInstance().flush()
+                WebProfiles.cookies(account.profile).flush()
                 if (loginMode) checkLoggedIn()
             }
 
@@ -251,11 +256,11 @@ class LoginActivity : ComponentActivity() {
                     ?.replace(TITLE_SUFFIX, "")?.trim()?.ifEmpty { null }
             }
         }
-        DebugLog.d("site", "opened, ${if (loginMode) "login" else "page " + DebugLog.url(pageUrl)}")
-        DebugLog.tokens("site", "tokens at open")
+        DebugLog.d("site", "opened for account $account, ${if (loginMode) "login" else "page " + DebugLog.url(pageUrl)}")
+        DebugLog.tokens("site", "tokens at open", account)
         if (loginMode) {
-            wasGuest = !OzonClient.isLoggedIn()
-            startToken = OzonClient.accessToken()
+            wasGuest = !OzonClient.isLoggedIn(account)
+            startToken = OzonClient.accessToken(account)
             handler.postDelayed(loginWatcher, 1000)
         }
         onBackPressedDispatcher.addCallback(this, webBack)
@@ -274,7 +279,7 @@ class LoginActivity : ComponentActivity() {
             }
         }
 
-        if (savedInstanceState == null) web.loadUrl(pageUrl ?: OzonClient.LOGIN_URL) else web.restoreState(savedInstanceState)
+        if (savedInstanceState == null) web.loadUrl(pageUrl ?: account.provider.loginUrl) else web.restoreState(savedInstanceState)
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -421,9 +426,9 @@ class LoginActivity : ComponentActivity() {
         super.onPause()
         DebugLog.d("ui", "LoginActivity " + if (isFinishing) "closed" else "hidden")
         // The process may be frozen or killed soon after: a pair the page rotated must be on disk.
-        CookieManager.getInstance().flush()
-        OzonClient.noteTokens()
-        if (!finishing) BarcodeStore.setLoggedIn(OzonClient.isLoggedIn())
+        WebProfiles.cookies(account.profile).flush()
+        OzonClient.noteTokens(account)
+        if (!finishing) account.setLoggedIn(OzonClient.isLoggedIn(account))
         // The screen below may refresh as soon as it resumes (onDestroy comes later).
         if (isFinishing) uncount()
     }
@@ -432,9 +437,9 @@ class LoginActivity : ComponentActivity() {
         runCatching { connectivity.unregisterNetworkCallback(network) }
         handler.removeCallbacksAndMessages(null)
         uncount()
-        DebugLog.tokens("site", "closed")
+        DebugLog.tokens("site", "closed", account)
         // Not destroyed at once: a request still in flight may bring a rotated login pair.
-        OzonClient.retire(web, startPrint)
+        OzonClient.retire(web, account, startPrint)
         super.onDestroy()
     }
 }

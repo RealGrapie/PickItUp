@@ -31,7 +31,7 @@ class KeepAliveJob : JobService() {
         scope.launch {
             val done = withTimeoutOrNull(MAX_MS) { OzonClient.alive.first { it == 0 } }
             DebugLog.d("keepalive", if (done == null) "gave up after ${MAX_MS / 1000} s" else "pages done, job finished")
-            CookieManager.getInstance().flush()
+            Accounts.flushCookies()
             jobFinished(params, false)
         }
         return true
@@ -39,7 +39,7 @@ class KeepAliveJob : JobService() {
 
     override fun onStopJob(params: JobParameters): Boolean {
         DebugLog.d("keepalive", "STOPPED by the system, reason ${params.stopReason}")
-        CookieManager.getInstance().flush()
+        Accounts.flushCookies()
         scope.coroutineContext.cancelChildren()
         return false
     }

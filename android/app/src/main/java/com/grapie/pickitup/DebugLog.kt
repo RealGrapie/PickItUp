@@ -51,8 +51,8 @@ object DebugLog {
     }
 
     /** name -> print of every ozon.ru cookie; values never leave this map unhashed. */
-    fun cookies(): Map<String, String> =
-        CookieManager.getInstance().getCookie("https://www.ozon.ru")
+    fun cookies(account: Account = Accounts.active): Map<String, String> =
+        WebProfiles.cookies(account.profile).getCookie("https://www.ozon.ru")
             ?.split(';')?.map { it.trim() }?.filter { '=' in it }
             ?.associate { c -> c.substringBefore('=') to describe(c.substringBefore('='), c.substringAfter('=')) }
             .orEmpty()
@@ -60,7 +60,8 @@ object DebugLog {
     private fun describe(name: String, value: String): String {
         val hash = MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
             .take(2).joinToString("") { "%02x".format(it) }
-        if (!name.contains("token", true)) return if (name == "__Secure-user-id") (if (value == "0") "0" else "set") else hash
+        // user-id: a print too, so two accounts (WebView profiles) can be told apart.
+        if (!name.contains("token", true)) return if (name == "__Secure-user-id") (if (value == "0") "0" else "set:$hash") else hash
         // "12.<account>.<session>.<..>.<payload>.<date>.<issued>...": account 0 = guest, issue time is no secret.
         val f = value.split('.')
         return hash + (if (f.getOrNull(1) == "0") " guest" else "") + (f.getOrNull(6)?.let { " @" + issued(it) } ?: "")
@@ -71,8 +72,8 @@ object DebugLog {
         if (t.length == 14 && t.all { it.isDigit() }) "${t.substring(6, 8)}.${t.substring(4, 6)} ${t.substring(8, 10)}:${t.substring(10, 12)}:${t.substring(12, 14)}" else "?"
 
     /** Logs which cookies appeared, changed or went away since [before]. */
-    fun cookieDiff(tag: String, what: String, before: Map<String, String>): Map<String, String> {
-        val now = cookies()
+    fun cookieDiff(tag: String, what: String, before: Map<String, String>, account: Account = Accounts.active): Map<String, String> {
+        val now = cookies(account)
         val changes = (before.keys + now.keys).sorted().mapNotNull { k ->
             val a = before[k]; val b = now[k]
             when {
@@ -86,8 +87,8 @@ object DebugLog {
         return now
     }
 
-    fun tokens(tag: String, what: String) {
-        d(tag, "$what: " + cookies().filterKeys { it.contains("token", true) || it == "__Secure-user-id" }
+    fun tokens(tag: String, what: String, account: Account = Accounts.active) {
+        d(tag, "$what: " + cookies(account).filterKeys { it.contains("token", true) || it == "__Secure-user-id" }
             .entries.joinToString(" ") { "${it.key.removePrefix("__Secure-")}=${it.value}" }.ifEmpty { "no login cookies" })
     }
 

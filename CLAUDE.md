@@ -12,7 +12,10 @@ watch/src/c/   Pebble C watchapp (SDK 4.33.1)
   code128.c    Code 128 encoder (set B/C switching)
   qr.c         QR encoder: byte mode, level M v1-2 (26 bytes), level L v1-5 (106 bytes)
 android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2 (io.rebble.pebblekit2)
-  OzonClient.kt         hidden-WebView fetch of the barcode, login/cookie checks
+  Accounts.kt           Provider (marketplace + its ProviderClient), Account (one login: own WebView
+                        profile, code, login state), Accounts (list, migration of the 1.x login)
+  WebProfiles.kt        per-account WebView profiles (androidx.webkit Profile API): cookies, storage
+  OzonClient.kt         hidden-WebView fetch of the barcode, login/cookie checks (per account)
   Net.kt                is this app's traffic on a VPN (per-UID default network)
   BarcodeSync.kt        fetch + push to the watch, WatchKeys (AppMessage keys, watch UUID)
   WatchListenerService  bound by the Pebble app when the watchapp sends a request

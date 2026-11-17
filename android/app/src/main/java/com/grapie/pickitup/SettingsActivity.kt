@@ -79,7 +79,7 @@ class SettingsActivity : BaseActivity() {
         val language by AppSettings.language.collectAsStateWithLifecycle()
         var confirmLogout by remember { mutableStateOf(false) }
         var showAbout by rememberSaveable { mutableStateOf(false) }
-        val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+        val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
 
         TopBarScreen(s.settings, onBack) {
             AppearanceSection()
@@ -209,9 +209,8 @@ class SettingsActivity : BaseActivity() {
                 confirmButton = {
                     TextButton(onClick = {
                         confirmLogout = false
-                        OzonClient.logout()
-                        BarcodeStore.clear()
-                        BarcodeStore.loginNeeded.value = true
+                        Accounts.active.let { it.provider.client.logout(it); it.clear() }
+                        Accounts.active.loginNeeded.value = true
                         BarcodeStore.log(s.logLoggedOut)
                         // If the watchapp is open it forgets the code now, else on its next request.
                         BarcodeSync.sendToWatchAsync(this@SettingsActivity)

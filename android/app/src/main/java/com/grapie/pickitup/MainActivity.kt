@@ -71,7 +71,7 @@ class MainActivity : BaseActivity() {
             MainScreen(onSettings = { startActivity(Intent(this, SettingsActivity::class.java)) })
             var splash by rememberSaveable { mutableStateOf(coldStart) }
             // Not over the splash or the login screen: only once there is an account to work for.
-            val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+            val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
             if (!splash && loggedIn) BatteryPrompt()
             if (splash) SplashOverlay(LocalStrings.current.splashTagline) { splash = false }
         }
@@ -85,7 +85,7 @@ class MainActivity : BaseActivity() {
         // Cold start: find out whether the watchapp is open (sending the stored code, no Ozon
         // request) instead of "Nothing sent yet". Not during a fetch: that would clear the
         // watch's "Updating...".
-        if (BarcodeStore.watchStatus.value == WatchStatus.UNKNOWN && !BarcodeStore.busy.value)
+        if (BarcodeStore.watchStatus.value == WatchStatus.UNKNOWN && !Accounts.active.busy.value)
             BarcodeSync.sendToWatchAsync(this)
     }
 
@@ -98,7 +98,7 @@ class MainActivity : BaseActivity() {
         super.onStop()
     }
 
-    private fun login() = loginLauncher.launch(Intent(this, LoginActivity::class.java))
+    private fun login() = loginLauncher.launch(LoginActivity.loginIntent(this, Accounts.active))
 
     /** Once, after the first login: explain, then hand over to the system dialog. */
     @Composable
@@ -131,12 +131,12 @@ class MainActivity : BaseActivity() {
     @Composable
     private fun MainScreen(onSettings: () -> Unit) {
         val s = LocalStrings.current
-        val barcode by BarcodeStore.shown.collectAsStateWithLifecycle()
+        val barcode by Accounts.active.shown.collectAsStateWithLifecycle()
         val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
-        val busy by BarcodeStore.busy.collectAsStateWithLifecycle()
-        val sessionLost by BarcodeStore.loginNeeded.collectAsStateWithLifecycle()
+        val busy by Accounts.active.busy.collectAsStateWithLifecycle()
+        val sessionLost by Accounts.active.loginNeeded.collectAsStateWithLifecycle()
         // The UI needs a real account id: guest cookies without one (e.g. an antibot page) still mean "log in".
-        val loggedIn by BarcodeStore.loggedIn.collectAsStateWithLifecycle()
+        val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
         // loginNeeded lives only in memory: after a restart the persisted loggedIn = false must
         // still show the "session ended" card over an old code (a background run found it out).
         val loginNeeded = (sessionLost || !loggedIn) && !demo
@@ -221,7 +221,7 @@ class MainActivity : BaseActivity() {
     @Composable
     private fun BarcodeScreen(onSettings: () -> Unit, canRefresh: Boolean, busy: Boolean, loginNeeded: Boolean) {
         val s = LocalStrings.current
-        val barcode by BarcodeStore.shown.collectAsStateWithLifecycle()
+        val barcode by Accounts.active.shown.collectAsStateWithLifecycle()
         val watchStatus by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
         val vpn by Net.vpn.collectAsStateWithLifecycle()
         val connected by Watches.connected.collectAsStateWithLifecycle()
@@ -323,7 +323,7 @@ class MainActivity : BaseActivity() {
                             s.myOrders, R.drawable.ic_shopping_bag,
                             {
                                 if (BarcodeStore.demo.value) Toast.makeText(this@MainActivity, s.demoOrders, Toast.LENGTH_SHORT).show()
-                                else LoginActivity.openPage(this@MainActivity, LoginActivity.ORDERS_URL)
+                                else Accounts.active.let { LoginActivity.openPage(this@MainActivity, it, it.provider.ordersUrl) }
                             },
                             Modifier.fillMaxWidth(), tonal = true,
                         )

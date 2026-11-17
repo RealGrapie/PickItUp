@@ -61,7 +61,7 @@ object BarcodeSync {
             sendToWatch(context, STATUS_WATCH_OFF, force = true, withCode = false)
             return@launch
         }
-        val cached = BarcodeStore.shown.value
+        val cached = Accounts.active.shown.value
         val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAt < FRESH_MS
         // With the Ozon site open in the app the cached code is shown; the site page owns the session.
         val needFetch = (kind == WatchKeys.REQUEST_REFRESH && !fresh || isStale(cached)) && !LoginActivity.isOpen
@@ -104,22 +104,23 @@ object BarcodeSync {
         runCatching { sender.close() }.onFailure { Log.w(TAG, "close failed", it) }
     }
 
-    suspend fun refresh(context: Context): FetchResult = fetchLock.withLock {
+    /** One request for [account]'s code; one at a time app-wide (each rotates a login pair). */
+    suspend fun refresh(context: Context, account: Account = Accounts.active): FetchResult = fetchLock.withLock {
         if (BarcodeStore.demo.value) {
             // Demo mode never talks to Ozon: spin for a moment and "receive" the sample code again.
-            BarcodeStore.busy.value = true
+            account.busy.value = true
             try {
                 kotlinx.coroutines.delay(900)
                 BarcodeStore.touchDemo()
             } finally {
-                BarcodeStore.busy.value = false
+                account.busy.value = false
             }
-            return@withLock FetchResult.Ok(BarcodeStore.shown.value!!)
+            return@withLock FetchResult.Ok(account.shown.value!!)
         }
-        if (!BarcodeStore.loggedIn.value) {
-            DebugLog.d("sync", "refresh skipped: logged out")
+        if (!account.loggedIn.value) {
+            DebugLog.d("sync", "refresh skipped: account $account logged out")
             // Not logged in: don't bother Ozon (it answers 500 for guests anyway).
-            BarcodeStore.loginNeeded.value = true
+            account.loginNeeded.value = true
             return@withLock FetchResult.LoginNeeded
         }
         if (LoginActivity.isOpen) {
@@ -132,26 +133,26 @@ object BarcodeSync {
             BarcodeStore.log(AppSettings.strings().logVpn)
             return@withLock FetchResult.Vpn
         }
-        BarcodeStore.busy.value = true
+        account.busy.value = true
         val s = AppSettings.strings()
         BarcodeStore.log(s.logFetching)
         val r = try {
-            OzonClient.fetch(context)
+            account.provider.client.fetch(context, account)
         } finally {
-            BarcodeStore.busy.value = false
+            account.busy.value = false
         }
         // Chromium is loaded by now anyway; Ozon may have ended the session meanwhile.
-        BarcodeStore.setLoggedIn(r is FetchResult.Ok || OzonClient.isLoggedIn())
+        account.setLoggedIn(r is FetchResult.Ok || account.provider.client.isLoggedIn(account))
         SessionProbe.onFetch(context, r)
         when (r) {
             is FetchResult.Ok -> {
-                BarcodeStore.save(r.barcode)
-                BarcodeStore.loginNeeded.value = false
+                account.save(r.barcode)
+                account.loginNeeded.value = false
                 // Only the tail: the journal is on the debug screen, which ends up in screenshots.
                 BarcodeStore.log(s.logFetched("…" + r.barcode.code.takeLast(4)))
             }
             FetchResult.LoginNeeded -> {
-                BarcodeStore.loginNeeded.value = true
+                account.loginNeeded.value = true
                 BarcodeStore.log(s.logLoginNeeded)
             }
             is FetchResult.Error -> BarcodeStore.log(s.logError(r.message))
@@ -163,7 +164,8 @@ object BarcodeSync {
     suspend fun sendToWatch(context: Context, status: String = "", force: Boolean = false, withCode: Boolean = true) {
         // No Pebble (setting off): don't even bind to the Pebble app.
         if (!force && !BarcodeStore.watchEnabled.value) return
-        val b = BarcodeStore.shown.value
+        val account = Accounts.active
+        val b = account.shown.value
         val dict = buildMap {
             if (!withCode) {
                 // Status only: the watch keeps whatever code it has stored.
@@ -171,7 +173,7 @@ object BarcodeSync {
                 put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
                 put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))
                 put(WatchKeys.UPDATED, PebbleDictionaryItem.Int32((b.fetchedAt / 1000).toInt()))
-            } else if (!BarcodeStore.loggedIn.value) {
+            } else if (!account.loggedIn.value) {
                 // Logged out: an empty code makes the watch forget the one it stored.
                 put(WatchKeys.CODE, PebbleDictionaryItem.Text(""))
             }

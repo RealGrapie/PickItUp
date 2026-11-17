@@ -9,23 +9,13 @@ import java.util.Locale
 
 data class Barcode(val code: String, val visible: String, val fetchedAt: Long)
 
-/** Last fetched barcode (persisted) plus process-wide UI state. */
+/** App-wide settings and state; each account's code and login live in [Account]. */
 object BarcodeStore {
     private lateinit var prefs: SharedPreferences
 
-    val barcode = MutableStateFlow<Barcode?>(null)
-    /** What the UI and the watch show: [barcode], or a sample code in demo mode. */
-    val shown = MutableStateFlow<Barcode?>(null)
     /** Demo mode for screenshots: sample code "12345678*9012", no real orders page. */
     val demo = MutableStateFlow(false)
     private var demoAt = System.currentTimeMillis()
-    val busy = MutableStateFlow(false)
-    val loginNeeded = MutableStateFlow(false)
-    /**
-     * [OzonClient.isLoggedIn], remembered: reading the cookie loads all of Chromium (~40 MB) into
-     * the process, so it's re-read only where a WebView runs anyway (login page, fetch, logout).
-     */
-    val loggedIn = MutableStateFlow(false)
     val watchStatus = MutableStateFlow(WatchStatus.UNKNOWN)
     /** Seconds without button presses before the watchapp closes itself; 0 = never. */
     val exitTimeout = MutableStateFlow(120)
@@ -43,7 +33,6 @@ object BarcodeStore {
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("barcode", Context.MODE_PRIVATE)
-        val code = prefs.getString("code", null)
         exitTimeout.value = prefs.getInt("exitTimeout", 120)
         refreshMode.value = runCatching { RefreshMode.valueOf(prefs.getString("refreshMode", null)!!) }
             .getOrDefault(RefreshMode.DAILY)
@@ -54,27 +43,8 @@ object BarcodeStore {
         backgroundRefresh.value = prefs.getBoolean("backgroundRefresh", true)
         openWatchappAfterRefresh.value = prefs.getBoolean("openWatchappAfterRefresh", false)
         watchEnabled.value = prefs.getBoolean("watchEnabled", true)
-        barcode.value = code?.let {
-            Barcode(it, prefs.getString("visible", it)!!, prefs.getLong("fetchedAt", 0))
-        }
         demo.value = prefs.getBoolean("demo", false)
         log.value = prefs.getString("journal", null)?.split('\n').orEmpty()
-        // Builds before the cache had only the cookie: read it once.
-        if (prefs.contains("loggedIn")) loggedIn.value = prefs.getBoolean("loggedIn", false)
-        else setLoggedIn(OzonClient.isLoggedIn())
-        updateShown()
-    }
-
-    fun setLoggedIn(on: Boolean) {
-        prefs.edit().putBoolean("loggedIn", on).apply()
-        loggedIn.value = on
-    }
-
-    fun save(b: Barcode) {
-        prefs.edit().putString("code", b.code).putString("visible", b.visible)
-            .putLong("fetchedAt", b.fetchedAt).apply()
-        barcode.value = b
-        updateShown()
     }
 
     fun setDemo(on: Boolean) {
@@ -91,8 +61,10 @@ object BarcodeStore {
     }
 
     private fun updateShown() {
-        shown.value = if (demo.value) Barcode(DEMO_CODE, DEMO_VISIBLE, demoAt) else barcode.value
+        Accounts.list.value.forEach { it.updateShown() }
     }
+
+    fun demoBarcode() = Barcode(DEMO_CODE, DEMO_VISIBLE, demoAt)
 
     const val DEMO_CODE = "12345678*9012"
     const val DEMO_VISIBLE = "1234 5678 * 9012"
@@ -131,12 +103,6 @@ object BarcodeStore {
     fun setExitTimeout(seconds: Int) {
         prefs.edit().putInt("exitTimeout", seconds).apply()
         exitTimeout.value = seconds
-    }
-
-    fun clear() {
-        prefs.edit().remove("code").remove("visible").remove("fetchedAt").apply()
-        barcode.value = null
-        updateShown()
     }
 
     // With the date: the journal is kept across restarts (background runs start the app anew).

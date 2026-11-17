@@ -34,7 +34,7 @@ class RefreshJobService : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         val daily = params.extras.containsKey(EXTRA_TARGET)
         // Logged out: nothing to do; the alarm chain goes on by itself. Demo mode refreshes (fake) for tests.
-        if (!BarcodeStore.loggedIn.value && !BarcodeStore.demo.value) return false
+        if (!Accounts.active.loggedIn.value && !BarcodeStore.demo.value) return false
         val waited = params.extras.getLong(EXTRA_TARGET, 0).takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000 }
         DebugLog.d("job", "started daily=$daily" + (waited?.let { ", ${it} s after the alarm" } ?: "") +
             ", job network=" + (if (params.network != null) "yes" else "none") + "; " + DebugLog.deviceState(applicationContext))
@@ -71,7 +71,7 @@ class RefreshJobService : JobService() {
         DebugLog.d("job", "STOPPED by the system, reason ${params.stopReason}; " + DebugLog.deviceState(applicationContext))
         BarcodeStore.log(AppSettings.strings().logBackgroundStopped)
         // The hidden page lives on (KeepAliveJob holds the process), but write what we have now.
-        android.webkit.CookieManager.getInstance().flush()
+        Accounts.flushCookies()
         scope.coroutineContext.cancelChildren()
         return true
     }
@@ -100,7 +100,7 @@ class RefreshJobService : JobService() {
             if (SessionProbe.active) {
                 // The probe owns the schedule: one request after each idle gap, nothing in between.
                 if (pending != null && !pending.isExpedited) scheduler.cancel(JOB_ID)
-                if (!BarcodeStore.loggedIn.value) { cancelAlarm(context); return }
+                if (!Accounts.active.loggedIn.value) { cancelAlarm(context); return }
                 val now = System.currentTimeMillis()
                 val prefs = prefs(context)
                 val retry = retryAt ?: prefs.getLong(KEY_RETRY_AT, 0).takeIf { it > now }

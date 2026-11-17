@@ -5,10 +5,8 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.ServiceWorkerClient
-import android.webkit.ServiceWorkerController
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -38,11 +36,9 @@ sealed interface FetchResult {
  * through, so the request is made by fetch() from an ozon.ru page, with the cookies
  * the user got when logging in via [LoginActivity].
  */
-object OzonClient {
+object OzonClient : ProviderClient {
     private const val TAG = "OzonClient"
-    const val HOME_URL = "https://www.ozon.ru/"
-    // The bare Ozon ID form: one tap shorter than going through the account page.
-    const val LOGIN_URL = "https://www.ozon.ru/ozonid-lite"
+    private val HOME_URL = Provider.OZON.homeUrl
     private const val TIMEOUT_MS = 60_000L
     private const val ATTEMPTS = 6
     private const val ATTEMPT_TIMEOUT_MS = 10_000L
@@ -71,20 +67,21 @@ object OzonClient {
     val alive = MutableStateFlow(0)
     /** Hidden fetch pages alive: the Service Worker guard is on only for them. */
     @Volatile private var hiddenPages = 0
-    private var swGuard = false
-    /** Token print once the last page was done: a fetch starting from another pair means a lost rotation. */
-    private var lastPrint: String? = null
+    /** WebView profiles whose Service Worker guard is installed. */
+    private val swGuarded = mutableSetOf<String>()
+    /** Per account: token print once its last page was done; a fetch starting from another pair means a lost rotation. */
+    private val lastPrint = mutableMapOf<String, String>()
 
     @SuppressLint("SetJavaScriptEnabled")
-    fun configure(web: WebView) {
+    fun configure(web: WebView, account: Account) {
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
         // Look like mobile Chrome rather than an embedded WebView.
         web.settings.userAgentString = web.settings.userAgentString.replace("; wv", "")
-        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
+        WebProfiles.cookies(account.profile).setAcceptThirdPartyCookies(web, true)
     }
 
-    suspend fun fetch(context: Context): FetchResult = withContext(Dispatchers.Main) {
+    override suspend fun fetch(context: Context, account: Account): FetchResult = withContext(Dispatchers.Main) {
         // A page from before (the last fetch, the orders page just closed) may still rotate the pair.
         withTimeoutOrNull(SETTLE_MS + 5_000) { alive.first { it == 0 } }
         alive.value++
@@ -92,25 +89,25 @@ object OzonClient {
         // Until the page is destroyed the process must not be frozen or killed: a watch request
         // has nothing else keeping it alive once the watchapp closes.
         KeepAliveJob.start(context)
-        installServiceWorkerGuard()
-        val web = WebView(context.applicationContext)
-        val before = tokenPrint()
-        lastPrint?.let { if (it != before) BarcodeStore.log(AppSettings.strings().logTokensChanged(it, before)) }
-        DebugLog.d("fetch", "start; alive=${alive.value} loginOpen=${LoginActivity.isOpen} vpn=${Net.vpnActive(context)}")
-        DebugLog.tokens("fetch", "tokens before")
-        val cookiesBefore = DebugLog.cookies()
+        installServiceWorkerGuard(account)
+        val web = WebView(context.applicationContext).also { WebProfiles.apply(it, account.profile) }
+        val before = tokenPrint(account)
+        lastPrint[account.id]?.let { if (it != before) BarcodeStore.log(AppSettings.strings().logTokensChanged(it, before)) }
+        DebugLog.d("fetch", "start, account $account; alive=${alive.value} loginOpen=${LoginActivity.isOpen} vpn=${Net.vpnActive(context)}")
+        DebugLog.tokens("fetch", "tokens before", account)
+        val cookiesBefore = DebugLog.cookies(account)
         val started = System.currentTimeMillis()
         try {
-            (withTimeoutOrNull(TIMEOUT_MS) { fetchIn(web) } ?: FetchResult.Error(AppSettings.strings().timeout))
+            (withTimeoutOrNull(TIMEOUT_MS) { fetchIn(web, account) } ?: FetchResult.Error(AppSettings.strings().timeout))
                 .also { DebugLog.d("fetch", "result after ${System.currentTimeMillis() - started} ms: ${describe(it)}") }
         } finally {
             // A rotated pair (document load or our own answer) must reach the disk at once: Chromium
             // writes cookies lazily, and the process may die right after the answer.
-            CookieManager.getInstance().flush()
-            val answered = tokenPrint()
+            WebProfiles.cookies(account.profile).flush()
+            val answered = tokenPrint(account)
             BarcodeStore.log(AppSettings.strings().logTokens(before, answered))
-            val afterAnswer = DebugLog.cookieDiff("fetch", "cookies at the answer", cookiesBefore)
-            retire(web, before, answered, hidden = true, cookiesNow = afterAnswer)
+            val afterAnswer = DebugLog.cookieDiff("fetch", "cookies at the answer", cookiesBefore, account)
+            retire(web, account, before, answered, hidden = true, cookiesNow = afterAnswer)
         }
     }
 
@@ -148,19 +145,20 @@ object OzonClient {
      * Cookies go to disk on every step; [KeepAliveJob] holds the process meanwhile.
      * [hidden] = a fetch page, already counted in [alive] since it started.
      */
-    fun retire(web: WebView, startPrint: String?, answered: String? = null, hidden: Boolean = false, cookiesNow: Map<String, String>? = null) {
-        CookieManager.getInstance().flush()
+    fun retire(web: WebView, account: Account, startPrint: String?, answered: String? = null, hidden: Boolean = false, cookiesNow: Map<String, String>? = null) {
+        val jar = WebProfiles.cookies(account.profile)
+        jar.flush()
         val context = web.context.applicationContext
-        val printNow = answered ?: tokenPrint()
+        val printNow = answered ?: tokenPrint(account)
         val tag = if (hidden) "fetch" else "site"
-        val cookiesAt = cookiesNow ?: DebugLog.cookies()
+        val cookiesAt = cookiesNow ?: DebugLog.cookies(account)
         if (!hidden) {
             alive.value++
             KeepAliveJob.start(context)
         }
         val rotated = startPrint != null && startPrint != printNow && printNow != "-"
-        if (rotated) markFresh(context)
-        val fresh = !rotated && isFresh(context)
+        if (rotated) markFresh(account)
+        val fresh = !rotated && isFresh(account)
         val main = Handler(Looper.getMainLooper())
         val since = System.currentTimeMillis()
         var done = false
@@ -168,15 +166,15 @@ object OzonClient {
             if (done) return
             done = true
             web.destroy()
-            CookieManager.getInstance().flush()
+            jar.flush()
             DebugLog.d(tag, "page destroyed after ${System.currentTimeMillis() - since} ms ($why)")
-            DebugLog.cookieDiff(tag, "cookies since retiring", cookiesAt)
-            val late = tokenPrint()
+            DebugLog.cookieDiff(tag, "cookies since retiring", cookiesAt, account)
+            val late = tokenPrint(account)
             if (late != printNow) {
                 BarcodeStore.log(AppSettings.strings().logTokens(printNow, late))
-                markFresh(context)
+                markFresh(account)
             }
-            lastPrint = late
+            lastPrint[account.id] = late
             if (hidden) hiddenPages--
             alive.value--
         }
@@ -188,7 +186,7 @@ object OzonClient {
                 override fun run() {
                     if (done) return
                     when {
-                        tokenPrint() != printNow -> destroy("pair rotated while waiting")
+                        tokenPrint(account) != printNow -> destroy("pair rotated while waiting")
                         System.currentTimeMillis() - since >= SETTLE_MS -> destroy("nothing came")
                         else -> main.postDelayed(this, SETTLE_POLL_MS)
                     }
@@ -197,15 +195,13 @@ object OzonClient {
         }
     }
 
-    private fun sessionPrefs(context: Context) = context.getSharedPreferences("session", Context.MODE_PRIVATE)
-
     /** Our own clock, not the token's: its issue time is in Ozon's time zone. */
-    private fun markFresh(context: Context) {
-        sessionPrefs(context).edit().putLong("pairSeenAt", System.currentTimeMillis()).apply()
+    private fun markFresh(account: Account) {
+        account.clientPrefs().edit().putLong("pairSeenAt", System.currentTimeMillis()).apply()
     }
 
-    private fun isFresh(context: Context): Boolean {
-        val at = sessionPrefs(context).getLong("pairSeenAt", 0)
+    private fun isFresh(account: Account): Boolean {
+        val at = account.clientPrefs().getLong("pairSeenAt", 0)
         val age = System.currentTimeMillis() - at
         return at > 0 && age in 0 until FRESH_PAIR_MS
     }
@@ -213,13 +209,12 @@ object OzonClient {
     /**
      * Ozon's site has a Service Worker. Its requests skip WebViewClient.shouldInterceptRequest and
      * would carry the session past [stubbed]; while a hidden fetch runs they are stubbed here too.
-     * The visible site ([LoginActivity]) is left alone. Process-wide, installed once.
+     * The visible site ([LoginActivity]) is left alone. Once per WebView profile (each has its own workers).
      */
-    private fun installServiceWorkerGuard() {
-        if (swGuard) return
-        swGuard = true
+    private fun installServiceWorkerGuard(account: Account) {
+        if (!swGuarded.add(account.profile)) return
         runCatching {
-            ServiceWorkerController.getInstance().setServiceWorkerClient(object : ServiceWorkerClient() {
+            WebProfiles.serviceWorkers(account.profile).setServiceWorkerClient(object : ServiceWorkerClient() {
                 override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
                     if (hiddenPages == 0 || LoginActivity.isOpen) {
                         if (request.url.host?.endsWith("ozon.ru") == true) DebugLog.d("sw", "pass (site) ${request.method} ${DebugLog.url(request.url.toString())}")
@@ -252,8 +247,8 @@ object OzonClient {
     }
 
     /** Journal-safe fingerprint of the login tokens: short name + 4 hex of SHA-256, never a value. */
-    private fun tokenPrint(): String {
-        val tokens = CookieManager.getInstance().getCookie("https://www.ozon.ru")
+    private fun tokenPrint(account: Account): String {
+        val tokens = WebProfiles.cookies(account.profile).getCookie("https://www.ozon.ru")
             ?.split(';')?.map { it.trim() }
             ?.filter { it.substringBefore('=').contains("token", ignoreCase = true) }
             .orEmpty()
@@ -267,18 +262,18 @@ object OzonClient {
     }
 
     /** Remembers the current pair as the one we left the session with (after a login, say). */
-    fun noteTokens() {
-        lastPrint = tokenPrint()
+    fun noteTokens(account: Account) {
+        lastPrint[account.id] = tokenPrint(account)
     }
 
     /** A login just issued this pair: it can't be rotated for the next two hours. */
-    fun noteLogin(context: Context) {
-        noteTokens()
-        markFresh(context.applicationContext)
+    fun noteLogin(account: Account) {
+        noteTokens(account)
+        markFresh(account)
     }
 
     /** Journal-safe print of the current pair (see [tokenPrint]). */
-    fun currentPrint() = tokenPrint()
+    fun currentPrint(account: Account) = tokenPrint(account)
 
     /**
      * Ozon's tokens are "12.<account id>.<session>...": a guest (logged-out) pair has account 0.
@@ -294,8 +289,8 @@ object OzonClient {
     }
 
     @SuppressLint("JavascriptInterface")
-    private suspend fun fetchIn(web: WebView): FetchResult = suspendCancellableCoroutine { cont ->
-        configure(web)
+    private suspend fun fetchIn(web: WebView, account: Account): FetchResult = suspendCancellableCoroutine { cont ->
+        configure(web, account)
         web.settings.blockNetworkImage = true
         // web.post() would never run: a View that is not attached to a window queues it forever.
         val main = Handler(Looper.getMainLooper())
@@ -312,7 +307,7 @@ object OzonClient {
                 DebugLog.d("fetch", "answer #$attempts: " + describeBody(status, body))
                 if (!cont.isActive) return@post
                 sentAt = 0
-                parse(status, body)?.let { cont.resume(it); return@post }
+                parse(status, body, account)?.let { cont.resume(it); return@post }
                 lastError = "HTTP $status: ${body.take(80).trim()}"
             }
         }, "OzonBridge")
@@ -341,7 +336,7 @@ object OzonClient {
                 DebugLog.d("page", "finished ${DebugLog.url(url)}")
                 // The document load is what rotates an expired pair: on disk now, not only at the
                 // answer - people swipe the app away from Recents right after tapping refresh.
-                CookieManager.getInstance().flush()
+                WebProfiles.cookies(account.profile).flush()
                 if (url.startsWith("https://www.ozon.ru")) pageReady = true
             }
 
@@ -380,52 +375,53 @@ object OzonClient {
     }
 
     /** null = not a final answer (antibot page, network hiccup), worth retrying. */
-    private fun parse(status: Int, body: String): FetchResult? {
+    private fun parse(status: Int, body: String, account: Account): FetchResult? {
         if (status == 401) return FetchResult.LoginNeeded
         // A JSON error is Ozon's own answer, not the antibot page: retrying won't help.
         // Ended sessions get "500 rpc error" here together with a guest pair; with the account's pair
         // still in place it is just a failed request (the session may well be alive).
         if (status >= 500 && body.trimStart().startsWith("{")) {
-            return if (isLoggedIn()) FetchResult.Error("HTTP $status") else FetchResult.LoginNeeded
+            return if (isLoggedIn(account)) FetchResult.Error("HTTP $status") else FetchResult.LoginNeeded
         }
         if (status != 200) return null
         val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
         val data = json.optJSONObject("data") ?: json
         // No code with the account's pair still in place: a strange answer, not a logout.
-        val noCode = if (isLoggedIn()) FetchResult.Error("HTTP 200 without a barcode") else FetchResult.LoginNeeded
+        val noCode = if (isLoggedIn(account)) FetchResult.Error("HTTP 200 without a barcode") else FetchResult.LoginNeeded
         val bc = data.optJSONObject("barcode") ?: return noCode
         val code = bc.optString("code")
         if (code.isEmpty()) return noCode
         return FetchResult.Ok(Barcode(code, bc.optString("visibleCode", code), System.currentTimeMillis()))
     }
 
-    private fun cookie(name: String): String? =
-        CookieManager.getInstance().getCookie("https://www.ozon.ru")
+    private fun cookie(account: Account, name: String): String? =
+        WebProfiles.cookies(account.profile).getCookie("https://www.ozon.ru")
             ?.split(';')?.map { it.trim() }
             ?.firstOrNull { it.startsWith("$name=") }?.substringAfter('=')
 
     /** Ozon sets `__Secure-user-id` to the account id after login (0 for guests). */
-    fun isLoggedIn(): Boolean {
-        val id = cookie("__Secure-user-id")
+    override fun isLoggedIn(account: Account): Boolean {
+        val id = cookie(account, "__Secure-user-id")
         if (id.isNullOrEmpty() || id == "0") return false
         // The id cookie may outlive the session: a guest access token means logged out.
-        return accessToken()?.let { !isGuestToken(it) } ?: true
+        return accessToken(account)?.let { !isGuestToken(it) } ?: true
     }
 
     /** Changes on every new login (and token refresh): tells a fresh session from a dead one. */
-    fun accessToken(): String? = cookie("__Secure-access-token")
+    fun accessToken(account: Account): String? = cookie(account, "__Secure-access-token")
 
-    fun logout() {
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
+    override fun logout(account: Account) {
+        val jar = WebProfiles.cookies(account.profile)
+        jar.removeAllCookies(null)
+        jar.flush()
         // The site's local storage belongs to that session too.
-        android.webkit.WebStorage.getInstance().deleteAllData()
-        BarcodeStore.setLoggedIn(false)
+        WebProfiles.storage(account.profile).deleteAllData()
+        account.setLoggedIn(false)
         // A page still settling may get a rotated pair after this and log us back in: clear again.
         if (alive.value > 0) Handler(Looper.getMainLooper()).postDelayed({
-            if (!BarcodeStore.loggedIn.value) {
-                CookieManager.getInstance().removeAllCookies(null)
-                CookieManager.getInstance().flush()
+            if (!account.loggedIn.value) {
+                jar.removeAllCookies(null)
+                jar.flush()
             }
         }, SETTLE_MS + 1_000)
     }

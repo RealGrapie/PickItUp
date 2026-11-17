@@ -11,6 +11,7 @@ class PickItUpApp : Application() {
         if (resources.getBoolean(R.bool.webview_debug)) android.webkit.WebView.setWebContentsDebuggingEnabled(true)
         AppSettings.init(this)
         BarcodeStore.init(this)
+        Accounts.init(this)  // after BarcodeStore (demo mode); migrates the 1.x login
         Watches.init(this)
         Updater.init(this)
         Net.init(this)
