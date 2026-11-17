@@ -58,6 +58,41 @@ import java.util.Date
 import java.util.Locale
 
 class SettingsActivity : BaseActivity() {
+    /** A login started from the accounts section; refresh that account once it's done. */
+    private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { res ->
+        val account = Accounts.byId(res.data?.getStringExtra(LoginActivity.EXTRA_ACCOUNT) ?: pendingLogin)
+        pendingLogin = null
+        if (account == null) return@registerForActivityResult
+        if (res.resultCode == RESULT_OK) BarcodeSync.refreshAndSend(this, account)
+        // "Add account" given up before logging in: no empty account left behind.
+        else if (!account.loggedIn.value && account.barcode.value == null && Accounts.list.value.size > 1) Accounts.remove(account)
+    }
+    private var pendingLogin: String? = null
+
+    private fun login(account: Account) {
+        pendingLogin = account.id
+        loginLauncher.launch(LoginActivity.loginIntent(this, account))
+    }
+
+    private fun addAccount() {
+        // Reads the WebView feature list: only here, on a tap, not while drawing the screen.
+        if (!Accounts.canAdd()) {
+            android.widget.Toast.makeText(this, AppSettings.strings().addAccountUnsupported, android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        val account = Accounts.add(Provider.OZON)
+        if (account.loggedIn.value) BarcodeSync.refreshAndSend(this, account) else login(account)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString("pendingLogin", pendingLogin)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        pendingLogin = savedInstanceState.getString("pendingLogin")
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setScreen { SettingsScreen(onBack = ::finish, onDebug = { startActivity(Intent(this, DebugActivity::class.java)) }) }
@@ -77,9 +112,12 @@ class SettingsActivity : BaseActivity() {
         val dailyMinutes by BarcodeStore.dailyMinutes.collectAsStateWithLifecycle()
         var showTimePicker by remember { mutableStateOf(false) }
         val language by AppSettings.language.collectAsStateWithLifecycle()
-        var confirmLogout by remember { mutableStateOf(false) }
+        // Account ids: the open account sheet and the confirmations it leads to.
+        var sheetFor by rememberSaveable { mutableStateOf<String?>(null) }
+        var confirmLogout by rememberSaveable { mutableStateOf<String?>(null) }
+        var confirmRemove by rememberSaveable { mutableStateOf<String?>(null) }
+        val accounts by Accounts.list.collectAsStateWithLifecycle()
         var showAbout by rememberSaveable { mutableStateOf(false) }
-        val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
 
         TopBarScreen(s.settings, onBack) {
             AppearanceSection()
@@ -159,7 +197,12 @@ class SettingsActivity : BaseActivity() {
             }
 
             SectionCard(s.sectionAccount, R.drawable.ic_lock) {
-                NavRow(R.drawable.ic_logout, s.logout, null, dangerColor(), enabled = loggedIn) { confirmLogout = true }
+                accounts.forEach { a ->
+                    val name by a.name.collectAsStateWithLifecycle()
+                    val on by a.loggedIn.collectAsStateWithLifecycle()
+                    NavRow(R.drawable.ic_person, a.label(name), if (on) s.accountLoggedIn else s.accountLoggedOut) { sheetFor = a.id }
+                }
+                NavRow(R.drawable.ic_add, s.addAccount, null, onClick = ::addAccount)
                 NavRow(R.drawable.ic_bug, s.openDebug, s.debugHint, onClick = onDebug)
             }
 
@@ -200,25 +243,85 @@ class SettingsActivity : BaseActivity() {
             )
         }
 
-        if (confirmLogout) {
+        Accounts.byId(sheetFor)?.let { a -> AccountSheet(a, onClose = { sheetFor = null },
+            onLogin = { sheetFor = null; login(a) },
+            onLogout = { sheetFor = null; confirmLogout = a.id },
+            onRemove = { sheetFor = null; confirmRemove = a.id }) }
+
+        Accounts.byId(confirmLogout)?.let { a ->
             AlertDialog(
-                onDismissRequest = { confirmLogout = false },
+                onDismissRequest = { confirmLogout = null },
                 icon = { Ic(R.drawable.ic_logout) },
                 title = { Text(s.logoutTitle) },
                 text = { Text(s.logoutText) },
                 confirmButton = {
                     TextButton(onClick = {
-                        confirmLogout = false
-                        Accounts.active.let { it.provider.client.logout(it); it.clear() }
-                        Accounts.active.loginNeeded.value = true
-                        BarcodeStore.log(s.logLoggedOut)
-                        // If the watchapp is open it forgets the code now, else on its next request.
-                        BarcodeSync.sendToWatchAsync(this@SettingsActivity)
-                        onBack()
+                        confirmLogout = null
+                        a.provider.client.logout(a)
+                        a.clear()
+                        a.loginNeeded.value = true
+                        BarcodeStore.log(s.logLoggedOut + " (" + a.label() + ")")
+                        // The watch shows the first account: if the watchapp is open it forgets the code now.
+                        if (a == Accounts.active) BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.logoutConfirm, color = MaterialTheme.colorScheme.error) }
                 },
-                dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text(s.cancel) } },
+                dismissButton = { TextButton(onClick = { confirmLogout = null }) { Text(s.cancel) } },
             )
+        }
+
+        Accounts.byId(confirmRemove)?.let { a ->
+            AlertDialog(
+                onDismissRequest = { confirmRemove = null },
+                icon = { Ic(R.drawable.ic_delete) },
+                title = { Text(s.removeAccountTitle) },
+                text = { Text(a.label() + "\n\n" + s.removeAccountText) },
+                confirmButton = {
+                    TextButton(onClick = {
+                        confirmRemove = null
+                        val wasFirst = a == Accounts.active
+                        Accounts.remove(a)
+                        BarcodeStore.log(s.removeAccount + ": " + a.label())
+                        if (wasFirst) BarcodeSync.sendToWatchAsync(this@SettingsActivity)
+                    }) { Text(s.removeAccountConfirm, color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = { TextButton(onClick = { confirmRemove = null }) { Text(s.cancel) } },
+            )
+        }
+    }
+
+    /** One account: its name, log in or out, remove (not the last one). */
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun AccountSheet(a: Account, onClose: () -> Unit, onLogin: () -> Unit, onLogout: () -> Unit, onRemove: () -> Unit) {
+        val s = LocalStrings.current
+        val loggedIn by a.loggedIn.collectAsStateWithLifecycle()
+        val accounts by Accounts.list.collectAsStateWithLifecycle()
+        var name by rememberSaveable(a.id) { mutableStateOf(a.name.value) }
+        fun close() {
+            Accounts.rename(a, name)
+            onClose()
+        }
+        ModalBottomSheet(onDismissRequest = ::close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(Modifier.padding(horizontal = 24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconBadge(R.drawable.ic_person)
+                    Spacer(Modifier.width(16.dp))
+                    Column {
+                        Text(a.label(name), style = MaterialTheme.typography.headlineSmall)
+                        Text(if (loggedIn) s.accountLoggedIn else s.accountLoggedOut, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.outline)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = name, onValueChange = { name = it.take(24) },
+                    label = { Text(s.accountName) }, supportingText = { Text(s.accountNameHint) },
+                    singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                )
+                Spacer(Modifier.height(8.dp))
+                if (loggedIn) NavRow(R.drawable.ic_logout, s.logout, null, dangerColor()) { Accounts.rename(a, name); onLogout() }
+                else NavRow(R.drawable.ic_login, s.login, null) { Accounts.rename(a, name); onLogin() }
+                if (accounts.size > 1) NavRow(R.drawable.ic_delete, s.removeAccount, null, dangerColor()) { onRemove() }
+            }
         }
     }
 

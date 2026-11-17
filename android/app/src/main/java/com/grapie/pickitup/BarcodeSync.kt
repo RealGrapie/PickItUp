@@ -42,10 +42,17 @@ object BarcodeSync {
     fun isStale(b: Barcode?) = b == null || RefreshSchedule.isStale(b.fetchedAt)
 
     /** Called from the UI. */
-    fun refreshAndSend(context: Context) = scope.launch {
-        refresh(context)
+    fun refreshAndSend(context: Context, account: Account = Accounts.active) = scope.launch {
+        refresh(context, account)
         sendToWatch(context)
     }
+
+    /**
+     * Every logged-in account, one after another (background runs). The worst outcome counts:
+     * an error or a VPN anywhere means "try again later"; Ok if at least one code came.
+     */
+    suspend fun refreshAll(context: Context): List<FetchResult> =
+        Accounts.list.value.filter { it.loggedIn.value || BarcodeStore.demo.value }.map { refresh(context, it) }
 
     /** Delivered only if the watchapp is open; otherwise it gets everything on its next request. */
     fun sendToWatchAsync(context: Context) = scope.launch {
@@ -143,7 +150,8 @@ object BarcodeSync {
         }
         // Chromium is loaded by now anyway; Ozon may have ended the session meanwhile.
         account.setLoggedIn(r is FetchResult.Ok || account.provider.client.isLoggedIn(account))
-        SessionProbe.onFetch(context, r)
+        // The probe follows the first account's session only.
+        if (account == Accounts.active) SessionProbe.onFetch(context, r)
         when (r) {
             is FetchResult.Ok -> {
                 account.save(r.barcode)

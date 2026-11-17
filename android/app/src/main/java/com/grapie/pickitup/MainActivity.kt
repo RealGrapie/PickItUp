@@ -16,6 +16,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -60,7 +62,8 @@ import java.util.Locale
 
 class MainActivity : BaseActivity() {
     private val loginLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        if (it.resultCode == RESULT_OK) BarcodeSync.refreshAndSend(this)
+        if (it.resultCode == RESULT_OK)
+            BarcodeSync.refreshAndSend(this, Accounts.byId(it.data?.getStringExtra(LoginActivity.EXTRA_ACCOUNT)) ?: Accounts.active)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,7 +101,7 @@ class MainActivity : BaseActivity() {
         super.onStop()
     }
 
-    private fun login() = loginLauncher.launch(LoginActivity.loginIntent(this, Accounts.active))
+    private fun login(account: Account = Accounts.active) = loginLauncher.launch(LoginActivity.loginIntent(this, account))
 
     /** Once, after the first login: explain, then hand over to the system dialog. */
     @Composable
@@ -130,21 +133,16 @@ class MainActivity : BaseActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun MainScreen(onSettings: () -> Unit) {
-        val s = LocalStrings.current
-        val barcode by Accounts.active.shown.collectAsStateWithLifecycle()
+        val accounts by Accounts.list.collectAsStateWithLifecycle()
+        val first = accounts.first()
+        val barcode by first.shown.collectAsStateWithLifecycle()
         val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
-        val busy by Accounts.active.busy.collectAsStateWithLifecycle()
-        val sessionLost by Accounts.active.loginNeeded.collectAsStateWithLifecycle()
         // The UI needs a real account id: guest cookies without one (e.g. an antibot page) still mean "log in".
-        val loggedIn by Accounts.active.loggedIn.collectAsStateWithLifecycle()
-        // loginNeeded lives only in memory: after a restart the persisted loggedIn = false must
-        // still show the "session ended" card over an old code (a background run found it out).
-        val loginNeeded = (sessionLost || !loggedIn) && !demo
-        val canRefresh = demo || loggedIn
-
-        val onboarding = !canRefresh && barcode == null
+        val loggedIn by first.loggedIn.collectAsStateWithLifecycle()
+        // Onboarding only while the one and only account has nothing; added accounts were added on purpose.
+        val onboarding = accounts.size == 1 && !(demo || loggedIn) && barcode == null
         AnimatedContent(onboarding, transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) }, label = "onboarding") {
-            if (it) OnboardingScreen(onSettings) else BarcodeScreen(onSettings, canRefresh, busy, loginNeeded)
+            if (it) OnboardingScreen(onSettings) else BarcodeScreen(onSettings, accounts)
         }
     }
 
@@ -219,9 +217,20 @@ class MainActivity : BaseActivity() {
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun BarcodeScreen(onSettings: () -> Unit, canRefresh: Boolean, busy: Boolean, loginNeeded: Boolean) {
+    private fun BarcodeScreen(onSettings: () -> Unit, accounts: List<Account>) {
         val s = LocalStrings.current
-        val barcode by Accounts.active.shown.collectAsStateWithLifecycle()
+        // Several accounts: swipe between their codes; everything below follows the page shown.
+        val pager = rememberPagerState { accounts.size }
+        val account = accounts.getOrElse(pager.currentPage) { accounts.first() }
+        val barcode by account.shown.collectAsStateWithLifecycle()
+        val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
+        val busy by account.busy.collectAsStateWithLifecycle()
+        val sessionLost by account.loginNeeded.collectAsStateWithLifecycle()
+        val loggedIn by account.loggedIn.collectAsStateWithLifecycle()
+        // loginNeeded lives only in memory: after a restart the persisted loggedIn = false must
+        // still show the "session ended" card over an old code (a background run found it out).
+        val loginNeeded = (sessionLost || !loggedIn) && !demo
+        val canRefresh = demo || loggedIn
         val watchStatus by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
         val vpn by Net.vpn.collectAsStateWithLifecycle()
         val connected by Watches.connected.collectAsStateWithLifecycle()
@@ -249,7 +258,7 @@ class MainActivity : BaseActivity() {
                     val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
                     val source = remember { MutableInteractionSource() }
                     ExtendedFloatingActionButton(
-                        onClick = { if (!busy) BarcodeSync.refreshAndSend(this@MainActivity) },
+                        onClick = { if (!busy) BarcodeSync.refreshAndSend(this@MainActivity, account) },
                         expanded = expanded,
                         icon = { Ic(R.drawable.ic_refresh, Modifier.graphicsLayer { rotationZ = if (busy) angle else 0f }) },
                         text = { Text(if (busy) s.refreshing else s.refresh, style = MaterialTheme.typography.titleMedium) },
@@ -266,9 +275,17 @@ class MainActivity : BaseActivity() {
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     Spacer(Modifier.height(4.dp))
-                    BarcodeCard(barcode, busy, onEnlarge = { fullscreen = true })
+                    HorizontalPager(pager, pageSpacing = 16.dp, verticalAlignment = Alignment.Top) { page ->
+                        val a = accounts.getOrNull(page) ?: return@HorizontalPager
+                        val b by a.shown.collectAsStateWithLifecycle()
+                        val pageBusy by a.busy.collectAsStateWithLifecycle()
+                        val name by a.name.collectAsStateWithLifecycle()
+                        val title = a.provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
+                        BarcodeCard(b, pageBusy, title, onEnlarge = { fullscreen = true })
+                    }
+                    if (accounts.size > 1) PagerDots(accounts.size, pager.currentPage)
 
-                    AnimatedVisibility(loginNeeded && barcode != null) { SessionCard() }
+                    AnimatedVisibility(loginNeeded && barcode != null) { SessionCard(account) }
                     AnimatedVisibility(vpn && !BarcodeStore.demo.value) { VpnCard() }
                     UpdateCard(skippable = true)
 
@@ -323,7 +340,7 @@ class MainActivity : BaseActivity() {
                             s.myOrders, R.drawable.ic_shopping_bag,
                             {
                                 if (BarcodeStore.demo.value) Toast.makeText(this@MainActivity, s.demoOrders, Toast.LENGTH_SHORT).show()
-                                else Accounts.active.let { LoginActivity.openPage(this@MainActivity, it, it.provider.ordersUrl) }
+                                else LoginActivity.openPage(this@MainActivity, account, account.provider.ordersUrl)
                             },
                             Modifier.fillMaxWidth(), tonal = true,
                         )
@@ -339,7 +356,7 @@ class MainActivity : BaseActivity() {
                 if (canRefresh) {
                     PullToRefreshBox(
                         isRefreshing = busy,
-                        onRefresh = { BarcodeSync.refreshAndSend(this@MainActivity) },
+                        onRefresh = { BarcodeSync.refreshAndSend(this@MainActivity, account) },
                         modifier = Modifier.fillMaxSize(),
                     ) { content() }
                 } else content()
@@ -351,7 +368,20 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun BarcodeCard(barcode: Barcode?, busy: Boolean, onEnlarge: () -> Unit) {
+    private fun PagerDots(count: Int, current: Int) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+            repeat(count) { i ->
+                val width by animateDpAsState(if (i == current) 20.dp else 8.dp, label = "dot")
+                Box(
+                    Modifier.padding(horizontal = 3.dp).size(width, 8.dp).clip(CircleShape)
+                        .background(if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun BarcodeCard(barcode: Barcode?, busy: Boolean, title: String, onEnlarge: () -> Unit) {
         val s = LocalStrings.current
         val source = remember { MutableInteractionSource() }
         val shape = MaterialTheme.shapes.extraLarge
@@ -377,7 +407,7 @@ class MainActivity : BaseActivity() {
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("OZON", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                        Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, maxLines = 1)
                         Text(
                             barcode.visible, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Medium, maxLines = 1,
@@ -408,14 +438,14 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun SessionCard() {
+    private fun SessionCard(account: Account) {
         val s = LocalStrings.current
         Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(s.sessionTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
                 Text(s.sessionText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
                 Spacer(Modifier.height(4.dp))
-                PillButton(s.login, R.drawable.ic_login, ::login)
+                PillButton(s.login, R.drawable.ic_login, { login(account) })
             }
         }
     }

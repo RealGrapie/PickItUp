@@ -34,15 +34,18 @@ class RefreshJobService : JobService() {
     override fun onStartJob(params: JobParameters): Boolean {
         val daily = params.extras.containsKey(EXTRA_TARGET)
         // Logged out: nothing to do; the alarm chain goes on by itself. Demo mode refreshes (fake) for tests.
-        if (!Accounts.active.loggedIn.value && !BarcodeStore.demo.value) return false
+        if (Accounts.list.value.none { it.loggedIn.value } && !BarcodeStore.demo.value) return false
         val waited = params.extras.getLong(EXTRA_TARGET, 0).takeIf { it > 0 }?.let { (System.currentTimeMillis() - it) / 1000 }
         DebugLog.d("job", "started daily=$daily" + (waited?.let { ", ${it} s after the alarm" } ?: "") +
             ", job network=" + (if (params.network != null) "yes" else "none") + "; " + DebugLog.deviceState(applicationContext))
         BarcodeStore.log(AppSettings.strings().logBackground)
         scope.launch {
-            val r = BarcodeSync.refresh(applicationContext)
+            val results = BarcodeSync.refreshAll(applicationContext)
+            // Retry soon if any account failed (the others just get a fresh code again then).
+            val failed = results.any { it is FetchResult.Error || it is FetchResult.Vpn }
+            val r = results.firstOrNull { it is FetchResult.Error || it is FetchResult.Vpn } ?: results.firstOrNull() ?: FetchResult.LoginNeeded
             // Delivered only if the watchapp is open right now; otherwise it asks on its next start.
-            if (r is FetchResult.Ok) {
+            if (results.any { it is FetchResult.Ok }) {
                 BarcodeSync.sendToWatch(applicationContext)
                 // Not open (watchface or another app): start it if asked to; it then requests the new code.
                 // Not connected / no Pebble app: nothing to start.
@@ -56,9 +59,9 @@ class RefreshJobService : JobService() {
             if (daily) {
                 jobFinished(params, false)
                 // After a failure try again in half an hour (the next day's alarm is already set).
-                if (r is FetchResult.Error || r is FetchResult.Vpn) schedule(applicationContext, retryAt = System.currentTimeMillis() + RETRY_MS)
+                if (failed) schedule(applicationContext, retryAt = System.currentTimeMillis() + RETRY_MS)
             } else {
-                jobFinished(params, r is FetchResult.Error || r is FetchResult.Vpn)  // periodic: let the system back off and retry
+                jobFinished(params, failed)  // periodic: let the system back off and retry
             }
         }
         return true
@@ -100,7 +103,7 @@ class RefreshJobService : JobService() {
             if (SessionProbe.active) {
                 // The probe owns the schedule: one request after each idle gap, nothing in between.
                 if (pending != null && !pending.isExpedited) scheduler.cancel(JOB_ID)
-                if (!Accounts.active.loggedIn.value) { cancelAlarm(context); return }
+                if (!Accounts.active.loggedIn.value) { cancelAlarm(context); return }  // the probe: first account only
                 val now = System.currentTimeMillis()
                 val prefs = prefs(context)
                 val retry = retryAt ?: prefs.getLong(KEY_RETRY_AT, 0).takeIf { it > now }

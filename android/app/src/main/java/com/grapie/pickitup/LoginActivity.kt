@@ -172,7 +172,7 @@ class LoginActivity : ComponentActivity() {
         OzonClient.noteLogin(account)
         // Now, not in onDestroy: that runs only after the main screen has resumed.
         account.setLoggedIn(true)
-        setResult(RESULT_OK)
+        setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCOUNT, account.id))
         finish()
     }
 

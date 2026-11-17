@@ -38,7 +38,13 @@ class Account internal constructor(
     /** WebView profile name; the account from before multi-account keeps the default one. */
     val profile: String,
     private val prefs: SharedPreferences,
+    name: String,
 ) {
+    /** The user's name for it ("Я", "Мама"); empty = just the provider's name. */
+    val name = MutableStateFlow(name)
+    /** Label on cards and rows: "Ozon" or "Ozon · Мама". */
+    fun label(name: String = this.name.value) = if (name.isBlank()) provider.title else "${provider.title} · $name"
+
     val barcode = MutableStateFlow<Barcode?>(null)
     /** What the UI and the watch show: [barcode], or a sample code in demo mode. */
     val shown = MutableStateFlow<Barcode?>(null)
@@ -93,10 +99,55 @@ object Accounts {
     private lateinit var prefs: SharedPreferences
     val list = MutableStateFlow<List<Account>>(emptyList())
 
-    /** The account the screens and the watch work with (the only one, for now). */
+    /** The first account: the one the watch gets (until the watch learns several codes). */
     val active: Account get() = list.value.first()
 
     fun byId(id: String?) = list.value.firstOrNull { it.id == id }
+
+    /** A second account needs its own WebView profile; old WebViews only have the default one. */
+    fun canAdd() = WebProfiles.supported() || list.value.none { it.profile == WebProfiles.DEFAULT }
+
+    /** A new, not yet logged in account; the caller opens its login page. */
+    fun add(provider: Provider): Account {
+        val used = list.value.map { it.profile }.toSet()
+        // The default profile when free (its account was removed), else account2, account3...
+        val profile = if (WebProfiles.DEFAULT !in used) WebProfiles.DEFAULT
+        else generateSequence(2) { it + 1 }.map { "account$it" }.first { it !in used }
+        val id = "${provider.id}-${System.currentTimeMillis()}"
+        prefs.edit().putString("$id.provider", provider.id).putString("$id.profile", profile).commit()
+        val account = load(id)!!
+        // A profile left from before may still hold a login: then the account starts logged in.
+        account.setLoggedIn(provider.client.isLoggedIn(account))
+        account.updateShown()
+        list.value = list.value + account
+        saveIds()
+        DebugLog.d("accounts", "added $id (profile $profile, logged in ${account.loggedIn.value})")
+        return account
+    }
+
+    /** Logs out and forgets the account, its code and (if not the default one) its WebView profile. */
+    fun remove(account: Account) {
+        if (list.value.size <= 1 || account !in list.value) return
+        runCatching { account.provider.client.logout(account) }
+        list.value = list.value - account
+        saveIds()
+        prefs.edit().remove("${account.id}.provider").remove("${account.id}.profile").remove("${account.id}.name").apply()
+        context.deleteSharedPreferences("account_${account.id}")
+        // Fails while a WebView still uses it (a page settling): its cookies are gone anyway.
+        if (account.profile != WebProfiles.DEFAULT) runCatching { androidx.webkit.ProfileStore.getInstance().deleteProfile(account.profile) }
+            .onFailure { DebugLog.d("accounts", "profile ${account.profile} kept: ${it.javaClass.simpleName}") }
+        DebugLog.d("accounts", "removed ${account.id}")
+    }
+
+    fun rename(account: Account, name: String) {
+        val clean = name.trim().take(24)
+        prefs.edit().putString("${account.id}.name", clean).apply()
+        account.name.value = clean
+    }
+
+    private fun saveIds() {
+        prefs.edit().putString("ids", list.value.joinToString(",") { it.id }).apply()
+    }
 
     /** After BarcodeStore and WebProfiles. */
     fun init(context: Context) {
@@ -121,7 +172,7 @@ object Accounts {
     private fun load(id: String): Account? {
         val provider = Provider.byId(prefs.getString("$id.provider", null)) ?: return null
         val profile = prefs.getString("$id.profile", null) ?: return null
-        return Account(id, provider, profile, accountPrefs(id))
+        return Account(id, provider, profile, accountPrefs(id), prefs.getString("$id.name", "")!!)
     }
 
     /** The single Ozon login of 1.x: default profile, code and login state from "barcode". */
