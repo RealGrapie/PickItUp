@@ -253,7 +253,7 @@ fun UpdateCard(modifier: Modifier = Modifier, skippable: Boolean = false) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val on = MaterialTheme.colorScheme.onPrimaryContainer
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(s.updateAvailable(r.version), style = MaterialTheme.typography.titleMedium, color = on, modifier = Modifier.weight(1f))
+                Text(s.updateAvailable(r.version) + if (Updater.isPrerelease(r.version)) " · ${s.betaTag}" else "", style = MaterialTheme.typography.titleMedium, color = on, modifier = Modifier.weight(1f))
                 if (skippable) IconButton({ Updater.skip(r.version) }, Modifier.size(32.dp)) {
                     Icon(painterResource(R.drawable.ic_close), s.skipUpdate, tint = on)
                 }

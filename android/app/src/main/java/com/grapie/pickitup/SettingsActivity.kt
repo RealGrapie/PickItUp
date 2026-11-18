@@ -228,6 +228,8 @@ class SettingsActivity : BaseActivity() {
                 ) { Updater.check(manual = true) }
                 val autoCheck by Updater.autoCheck.collectAsStateWithLifecycle()
                 SwitchRow(s.autoCheckLabel, s.autoCheckHint, autoCheck, Updater::setAutoCheck)
+                val beta by Updater.beta.collectAsStateWithLifecycle()
+                SwitchRow(s.betaLabel, s.betaHint, beta, Updater::setBeta)
             }
             UpdateCard()
         }

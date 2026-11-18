@@ -169,11 +169,19 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   self-update; else `InstallReceiver` starts the system confirmation). REQUEST_INSTALL_PACKAGES
   + the user's one-time "install unknown apps" switch are still required. Cancelling is not an error.
   So every release needs: a `vX.Y` tag, an attached `pickitup.apk` signed with the release key,
-  and a bumped `versionCode` / `versionName` (+ `watch/package.json` `version`). Release body
+  and a bumped `versionName` (+ `watch/package.json` `version`). `versionCode` is not set by
+  hand since 1.5.2: minutes since 2026-01-01 UTC at build time (`BuildTime` ValueSource in
+  app/build.gradle.kts, as in BooruClient), so every build is newer than the last. Release body
   format (`localizedNotes`, tested in `ReleaseNotesTest`): a `## English` section, then
   `## Русский` (English first), each = one plain highlight line (the update card shows it) + short unwrapped `- `
   points (the "What's new" sheet). Lines are split by Cyrillic; headings and `**` are dropped.
   Tested on the emulator: 1.0 -> found v1.1 -> downloaded -> installer -> 1.1 installed.
+  Beta channel: settings switch "Бета-версии" (`Updater.beta`, default off) reads `/releases`
+  (pre-releases included, drafts skipped) and takes the highest version instead of
+  `/releases/latest`. Versions compare semver-like (`compareVersions`, `UpdaterVersionTest`):
+  `1.6-beta.1` < `1.6-beta.2` < `1.6-rc.1` < `1.6`. A beta = a GitHub release marked
+  "pre-release", tag `v1.6-beta.1`, `versionName` the same; the build-time `versionCode` keeps it
+  above the stable build made before it, and the stable 1.6 built later above the beta.
 
 ## Hard-won rules
 

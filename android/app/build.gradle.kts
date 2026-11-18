@@ -19,8 +19,9 @@ android {
     applicationId = "com.grapie.pickitup"
     minSdk = 31  // Android 12: the Pebble (Core Devices) app needs it anyway
     targetSdk = 37
-    versionCode = 10
-    versionName = "1.5.1"
+    // Set by hand for every release; it must match the GitHub tag ("1.6-beta.1" <-> v1.6-beta.1),
+    // the updater compares the two. versionCode comes from the build time (BuildTime below).
+    versionName = "1.5.2"
   }
 
   signingConfigs {
@@ -66,4 +67,24 @@ dependencies {
   implementation(libs.zxing.core)
   testImplementation(libs.junit)
   testImplementation(libs.org.json)
+}
+
+/**
+ * The build's time, read when the APK is made (worked out in defaultConfig the configuration cache
+ * would keep it, and builds days apart would get one versionCode).
+ */
+abstract class BuildTime : ValueSource<Long, ValueSourceParameters.None> {
+  override fun obtain(): Long = System.currentTimeMillis()
+}
+
+// versionCode = minutes since 2026-01-01 UTC: every build is newer than the one before, so a beta
+// and the release after it never need a hand-picked code. Was 10 by hand up to 1.5.1; fits an Int
+// (and Play's 2 100 000 000 limit) until about the year 6000.
+androidComponents {
+  onVariants { variant ->
+    val time = providers.of(BuildTime::class.java) {}
+    variant.outputs.forEach { out ->
+      out.versionCode.set(time.map { ((it - 1_767_225_600_000L) / 60_000L).toInt() })
+    }
+  }
 }
