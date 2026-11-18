@@ -9,6 +9,7 @@ composeBom = "2026.09.00"
 coroutines = "1.10.2"
 pebblekit = "1.3.2"
 junit = "4.13.2"
+zxing = "3.5.4"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -21,7 +22,9 @@ androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
+org-json = { module = "org.json:json", version = "20260814" }
 pebblekit = { module = "io.rebble.pebblekit2:client", version.ref = "pebblekit" }
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxing" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

@@ -32,6 +32,9 @@ object DebugLog {
 
     fun mask(text: String) = digits.replace(text) { "#".repeat(it.value.length.coerceAtMost(4)) + "…" }
 
+    /** A moment as "dd.MM HH:mm" (e.g. when a token expires); "-" for 0. */
+    fun at(ms: Long): String = if (ms <= 0) "-" else SimpleDateFormat("dd.MM HH:mm", Locale.US).format(Date(ms))
+
     /** Path only: queries may carry ids and tokens. */
     fun url(u: String?): String = u?.substringBefore('?')?.substringBefore('#')?.let(::mask) ?: "-"
 

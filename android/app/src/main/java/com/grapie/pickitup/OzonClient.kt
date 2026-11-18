@@ -24,7 +24,8 @@ import java.util.UUID
 import kotlin.coroutines.resume
 
 sealed interface FetchResult {
-    data class Ok(val barcode: Barcode) : FetchResult
+    /** [days]: one code per day when the marketplace hands out several (Wildberries); [barcode] = today's. */
+    data class Ok(val barcode: Barcode, val days: List<Barcode> = emptyList()) : FetchResult
     data object LoginNeeded : FetchResult
     data class Error(val message: String) : FetchResult
     /** Not tried: the app's traffic goes through a VPN ([Net.vpnActive]). */
@@ -71,15 +72,6 @@ object OzonClient : ProviderClient {
     private val swGuarded = mutableSetOf<String>()
     /** Per account: token print once its last page was done; a fetch starting from another pair means a lost rotation. */
     private val lastPrint = mutableMapOf<String, String>()
-
-    @SuppressLint("SetJavaScriptEnabled")
-    fun configure(web: WebView, account: Account) {
-        web.settings.javaScriptEnabled = true
-        web.settings.domStorageEnabled = true
-        // Look like mobile Chrome rather than an embedded WebView.
-        web.settings.userAgentString = web.settings.userAgentString.replace("; wv", "")
-        WebProfiles.cookies(account.profile).setAcceptThirdPartyCookies(web, true)
-    }
 
     override suspend fun fetch(context: Context, account: Account): FetchResult = withContext(Dispatchers.Main) {
         // A page from before (the last fetch, the orders page just closed) may still rotate the pair.

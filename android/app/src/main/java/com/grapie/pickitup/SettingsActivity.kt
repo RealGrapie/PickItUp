@@ -74,13 +74,21 @@ class SettingsActivity : BaseActivity() {
         loginLauncher.launch(LoginActivity.loginIntent(this, account))
     }
 
+    /** "Add account" was tapped: which marketplace (a dialog), then its login. */
+    private val choosing = mutableStateOf(false)
+
     private fun addAccount() {
         // Reads the WebView feature list: only here, on a tap, not while drawing the screen.
         if (!Accounts.canAdd()) {
             android.widget.Toast.makeText(this, AppSettings.strings().addAccountUnsupported, android.widget.Toast.LENGTH_LONG).show()
             return
         }
-        val account = Accounts.add(Provider.OZON)
+        choosing.value = true
+    }
+
+    private fun addAccount(provider: Provider) {
+        choosing.value = false
+        val account = Accounts.add(provider)
         if (account.loggedIn.value) BarcodeSync.refreshAndSend(this, account) else login(account)
     }
 
@@ -226,6 +234,23 @@ class SettingsActivity : BaseActivity() {
 
         if (showAbout) AboutSheet { showAbout = false }
 
+        if (choosing.value) {
+            AlertDialog(
+                onDismissRequest = { choosing.value = false },
+                icon = { Ic(R.drawable.ic_add) },
+                title = { Text(s.chooseMarketplace) },
+                text = {
+                    Column {
+                        Provider.entries.forEach { p ->
+                            NavRow(R.drawable.ic_shopping_bag, p.fullName, null) { addAccount(p) }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { choosing.value = false }) { Text(s.cancel) } },
+            )
+        }
+
         if (showTimePicker) {
             val state = rememberTimePickerState(dailyMinutes / 60, dailyMinutes % 60, is24Hour = true)
             AlertDialog(
@@ -252,15 +277,15 @@ class SettingsActivity : BaseActivity() {
             AlertDialog(
                 onDismissRequest = { confirmLogout = null },
                 icon = { Ic(R.drawable.ic_logout) },
-                title = { Text(s.logoutTitle) },
-                text = { Text(s.logoutText) },
+                title = { Text(a.provider.text(s.logoutTitle)) },
+                text = { Text(a.provider.text(s.logoutText)) },
                 confirmButton = {
                     TextButton(onClick = {
                         confirmLogout = null
                         a.provider.client.logout(a)
                         a.clear()
                         a.loginNeeded.value = true
-                        BarcodeStore.log(s.logLoggedOut, a)
+                        BarcodeStore.log(a.provider.text(s.logLoggedOut), a)
                         // If the watchapp is open it forgets the code now, else on its next request.
                         BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.logoutConfirm, color = MaterialTheme.colorScheme.error) }
@@ -317,8 +342,8 @@ class SettingsActivity : BaseActivity() {
                     singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                if (loggedIn) NavRow(R.drawable.ic_logout, s.logout, null, dangerColor()) { Accounts.rename(a, name); onLogout() }
-                else NavRow(R.drawable.ic_login, s.login, null) { Accounts.rename(a, name); onLogin() }
+                if (loggedIn) NavRow(R.drawable.ic_logout, a.provider.text(s.logout), null, dangerColor()) { Accounts.rename(a, name); onLogout() }
+                else NavRow(R.drawable.ic_login, a.provider.text(s.login), null) { Accounts.rename(a, name); onLogin() }
                 if (accounts.size > 1) NavRow(R.drawable.ic_delete, s.removeAccount, null, dangerColor()) { onRemove() }
             }
         }

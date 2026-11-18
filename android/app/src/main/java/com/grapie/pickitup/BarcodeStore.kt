@@ -7,7 +7,20 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-data class Barcode(val code: String, val visible: String, val fetchedAt: Long)
+/** How a pickup point scans the code: Ozon's Code 128, Wildberries' QR. */
+enum class CodeFormat(val watchValue: Int) { CODE128(0), QR(1) }
+
+/**
+ * A pickup code. [validFrom] (epoch ms) is set for codes made for one day (Wildberries hands out a
+ * week of them, each from its local midnight); 0 = valid until a new one comes (Ozon).
+ */
+data class Barcode(
+    val code: String,
+    val visible: String,
+    val fetchedAt: Long,
+    val format: CodeFormat = CodeFormat.CODE128,
+    val validFrom: Long = 0,
+)
 
 /** App-wide settings and state; each account's code and login live in [Account]. */
 object BarcodeStore {
@@ -64,10 +77,15 @@ object BarcodeStore {
         Accounts.list.value.forEach { it.updateShown() }
     }
 
-    fun demoBarcode() = Barcode(DEMO_CODE, DEMO_VISIBLE, demoAt)
+    fun demoBarcode(provider: Provider = Provider.OZON) = when (provider) {
+        Provider.OZON -> Barcode(DEMO_CODE, DEMO_VISIBLE, demoAt)
+        Provider.WB -> Barcode(DEMO_QR, DEMO_QR_VISIBLE, demoAt, CodeFormat.QR)
+    }
 
     const val DEMO_CODE = "12345678*9012"
     const val DEMO_VISIBLE = "1234 5678 * 9012"
+    const val DEMO_QR = "123456789_123456_1"
+    const val DEMO_QR_VISIBLE = "123 456"
 
     fun setRefreshHours(hours: Int) {
         prefs.edit().putInt("refreshHours", hours).apply()

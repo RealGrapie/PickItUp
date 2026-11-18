@@ -33,7 +33,9 @@
       "Timeout": 10005,
       "Index": 10006,
       "Count": 10007,
-      "Name": 10008
+      "Name": 10008,
+      "Format": 10009,
+      "Days": 10010
     },
     "companionApp": {
       "android": {

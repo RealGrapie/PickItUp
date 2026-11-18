@@ -3,8 +3,9 @@
 #include "code128.h"
 #include "qr.h"
 
-// Ozon pickup barcode. The phone companion pushes the code; the watch keeps it in
-// persistent storage so it can be shown at the pickup point without a phone link.
+// Pickup code (Ozon: Code 128; Wildberries: a QR, one per day). The phone companion pushes the
+// code; the watch keeps it in persistent storage so it can be shown at the pickup point without a
+// phone link. Day codes come with the next days too, and the watch moves on at midnight by itself.
 //
 // Buttons: SELECT - cycle barcode / QR code (test) / rotated barcode (more quiet zone),
 // long SELECT - setup screen with a QR link to the phone app (BACK closes it), UP - ask the phone to re-fetch
@@ -51,12 +52,17 @@ static Layer *s_canvas;
 #define PERSIST_COUNT 7
 #define PERSIST_CURRENT 8
 #define PERSIST_NAME0 9
+#define FORMAT_CODE128 0
+#define FORMAT_QR 1
+#define DAYS_MAX_LEN 200  // "<from>|<code>|<text>" lines for the next days (persist values <= 256 bytes)
 typedef struct {
   char code[CODE128_MAX_CHARS + 1];
   char visible[24];
   char name[20];    // header line from the phone, e.g. "OZON: Mama"
   char status[24];  // footer override: "Updating...", "Log in on phone"...
   time_t updated;
+  int format;       // FORMAT_CODE128 (Ozon) or FORMAT_QR (Wildberries)
+  char days[DAYS_MAX_LEN];  // codes for the days after this one (Wildberries)
 } Account;
 static Account s_acc[MAX_ACCOUNTS];
 static int s_count = 1;
@@ -67,8 +73,9 @@ static int s_cur;
 #define s_status (s_acc[s_cur].status)
 #define s_updated (s_acc[s_cur].updated)
 
-enum { F_CODE, F_VISIBLE, F_UPDATED, F_NAME };
+enum { F_CODE, F_VISIBLE, F_UPDATED, F_NAME, F_FORMAT, F_DAYS, F_COUNT };
 static uint32_t pkey(int i, int field) {
+  if (field >= F_FORMAT) return 200 + i * 2 + (field - F_FORMAT);  // added in 1.6
   if (i == 0) {
     static const uint32_t first[] = { PERSIST_CODE, PERSIST_VISIBLE, PERSIST_UPDATED, PERSIST_NAME0 };
     return first[field];
@@ -97,9 +104,53 @@ static AppTimer *s_answer_timer;
 static AppTimer *s_fetch_timer;  // armed while the phone says "Updating..."
 static bool s_show_setup;  // setup screen opened with long SELECT
 
+#define s_format (s_acc[s_cur].format)
+
 static void encode(void) {
   s_nwidths = code128_encode(s_code, CODE128_DENSE, s_widths, &s_modules);
   qr_encode(s_code, QR_EC_M, &s_qr);
+  // A QR code needs no bars; s_nwidths doubles as "there is a code to show".
+  if (s_format == FORMAT_QR) s_nwidths = s_code[0] && s_qr.size ? 1 : 0;
+}
+
+// Day codes: once a day in a->days has begun, it becomes the account's code and the lines up to
+// it are dropped. Returns whether the code changed.
+static bool next_day(Account *a, int i) {
+  time_t now = time(NULL);
+  bool changed = false;
+  char *p = a->days;
+  while (*p) {
+    char *end = strchr(p, '\n');
+    char *bar1 = strchr(p, '|');
+    if (!bar1 || (end && bar1 > end)) break;
+    time_t from = (time_t)atoi(p);
+    if (from > now) break;
+    char *bar2 = strchr(bar1 + 1, '|');
+    if (!bar2 || (end && bar2 > end)) break;
+    int code_len = bar2 - bar1 - 1;
+    int text_len = (end ? end : p + strlen(p)) - bar2 - 1;
+    if (code_len > CODE128_MAX_CHARS) code_len = CODE128_MAX_CHARS;
+    if (text_len > (int)sizeof(a->visible) - 1) text_len = sizeof(a->visible) - 1;
+    memcpy(a->code, bar1 + 1, code_len);
+    a->code[code_len] = '\0';
+    memcpy(a->visible, bar2 + 1, text_len);
+    a->visible[text_len] = '\0';
+    changed = true;
+    p = end ? end + 1 : p + strlen(p);
+  }
+  if (changed) {
+    memmove(a->days, p, strlen(p) + 1);
+    persist_write_string(pkey(i, F_CODE), a->code);
+    persist_write_string(pkey(i, F_VISIBLE), a->visible);
+    persist_write_string(pkey(i, F_DAYS), a->days);
+  }
+  return changed;
+}
+
+static void next_day_all(void) {
+  for (int i = 0; i < s_count; i++) {
+    if (next_day(&s_acc[i], i) && i == s_cur) encode();
+  }
 }
 
 static void load_state(void) {
@@ -111,6 +162,9 @@ static void load_state(void) {
     persist_read_string(pkey(i, F_VISIBLE), a->visible, sizeof(a->visible));
     persist_read_string(pkey(i, F_NAME), a->name, sizeof(a->name));
     a->updated = persist_read_int(pkey(i, F_UPDATED));
+    a->format = persist_read_int(pkey(i, F_FORMAT));  // 0 = Code 128 when not stored (before 1.6)
+    persist_read_string(pkey(i, F_DAYS), a->days, sizeof(a->days));
+    next_day(a, i);
   }
   s_cur = persist_read_int(PERSIST_CURRENT);
   if (s_cur < 0 || s_cur >= s_count) s_cur = 0;
@@ -121,13 +175,14 @@ static void load_state(void) {
   if (!s_acc[0].code[0]) {
     s_count = 2;
     static const char *demo[2][3] = { { "12345678*9012", "1234 5678 * 9012", "OZON: Me" },
-                                      { "87654321*0987", "8765 4321 * 0987", "OZON: Family" } };
+                                      { "123456789_123456_1", "123 456", "WB: Family" } };
     for (int i = 0; i < 2; i++) {
       strcpy(s_acc[i].code, demo[i][0]);
       strcpy(s_acc[i].visible, demo[i][1]);
       strcpy(s_acc[i].name, demo[i][2]);
       s_acc[i].updated = time(NULL) - (3 + 20 * i) * 3600;
     }
+    s_acc[1].format = FORMAT_QR;
   }
 #endif
   encode();
@@ -139,9 +194,10 @@ static void select_account(int i) {
   encode();
 }
 
-// Header over the code: the account's name once there are several.
+// Header over the code: from the phone ("OZON: Mama", or "WB pickup code" for the only account).
+// Phone apps before 1.6 sent a name only with several accounts.
 static const char *header_text(void) {
-  return s_count > 1 && s_acc[s_cur].name[0] ? s_acc[s_cur].name : "OZON pickup code";
+  return s_acc[s_cur].name[0] ? s_acc[s_cur].name : "OZON pickup code";
 }
 
 static void draw_text(GContext *ctx, const char *text, const char *font, GRect box) {
@@ -252,7 +308,7 @@ static void draw_setup(GContext *ctx, GRect b) {
       title = "Checking phone...";
     } else if (s_phone == PHONE_ANSWERED) {
       bool fetching = strcmp(s_status, STATUS_UPDATING) == 0;
-      title = login ? "Log in to Ozon" : fetching ? "Getting barcode..." : "No barcode yet";
+      title = login ? "Log in on phone" : fetching ? "Getting code..." : "No code yet";
       text = login ? "Open PickItUp! on your phone and log in" : fetching ? "" : s_status;
     }
     if (title) {
@@ -331,6 +387,9 @@ static void account_footer(const Account *a, char *out, size_t n) {
     char when[8];
     strftime(when, sizeof(when), "%H:%M", &upd);
     snprintf(out, n, "%supd today %s", offline, when);
+  } else if (a->format == FORMAT_QR) {
+    // A day code is today's as long as it was handed out for today (next_day moved on to it).
+    snprintf(out, n, "%scode for today", offline);
   } else {
     snprintf(out, n, "%soutdated", offline);
   }
@@ -338,7 +397,8 @@ static void account_footer(const Account *a, char *out, size_t n) {
 
 static void footer_text(char *out, size_t n) { account_footer(&s_acc[s_cur], out, n); }
 
-static GColor header_bg(void) { return PBL_IF_COLOR_ELSE(GColorBlueMoon, GColorWhite); }
+// Ozon blue, Wildberries purple (the QR accounts are Wildberries).
+static GColor header_bg(void) { return PBL_IF_COLOR_ELSE(s_format == FORMAT_QR ? GColorPurple : GColorBlueMoon, GColorWhite); }
 static GColor header_fg(void) { return PBL_IF_COLOR_ELSE(GColorWhite, GColorBlack); }
 
 static const char *title_font(bool big) { return big ? FONT_KEY_GOTHIC_24_BOLD : FONT_KEY_GOTHIC_18_BOLD; }
@@ -478,7 +538,9 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     draw_setup(ctx, b);
     return;
   }
-  if (s_mode == MODE_VERTICAL) {
+  // Wildberries scans a QR: the barcode views would only show a code nobody reads.
+  ViewMode mode = s_format == FORMAT_QR ? MODE_QR : s_mode;
+  if (mode == MODE_VERTICAL) {
     draw_rotated(ctx, b);
     return;
   }
@@ -487,7 +549,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   bool big = b.size.w >= 200;
   Layout l = layout_for(b);
   draw_frame_texts(ctx, &l, big);
-  if (s_mode == MODE_QR) {
+  if (mode == MODE_QR) {
 #ifdef PBL_ROUND
     draw_qr(ctx, &s_qr, centered_square(b, 46, (l.content.origin.y + l.content.size.h / 2) * 100 / b.size.h), 1);
 #else
@@ -600,7 +662,7 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     if (count >= 1 && count != s_count) {
       // Accounts removed on the phone: forget their codes.
       for (int k = count; k < s_count; k++) {
-        for (int f = F_CODE; f <= F_NAME; f++) persist_delete(pkey(k, f));
+        for (int f = F_CODE; f < F_COUNT; f++) persist_delete(pkey(k, f));
         memset(&s_acc[k], 0, sizeof(s_acc[k]));
       }
       s_count = count;
@@ -614,6 +676,12 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     copy_string(a->name, sizeof(a->name), t);
     persist_write_string(pkey(i, F_NAME), a->name);
   }
+  // Before the code: it decides how the code gets encoded.
+  if ((t = dict_find(it, MESSAGE_KEY_Format))) {
+    a->format = t->value->int32;
+    persist_write_int(pkey(i, F_FORMAT), a->format);
+    if (shown) encode();
+  }
   if ((t = dict_find(it, MESSAGE_KEY_Code)) && t->type == TUPLE_CSTRING && t->length <= 1) {
     // Empty code = logged out on the phone: forget the stored one, back to the setup screens.
     a->code[0] = a->visible[0] = '\0';
@@ -621,6 +689,8 @@ static void inbox_received(DictionaryIterator *it, void *context) {
     persist_delete(pkey(i, F_CODE));
     persist_delete(pkey(i, F_VISIBLE));
     persist_delete(pkey(i, F_UPDATED));
+    a->days[0] = 0;
+    persist_delete(pkey(i, F_DAYS));
     if (shown) {
       s_nwidths = 0;
       restart_exit_timer();
@@ -644,6 +714,11 @@ static void inbox_received(DictionaryIterator *it, void *context) {
   if (!too_long && (t = dict_find(it, MESSAGE_KEY_Updated))) {
     a->updated = (time_t)t->value->int32;
     persist_write_int(pkey(i, F_UPDATED), (int32_t)a->updated);
+  }
+  if (!too_long && (t = dict_find(it, MESSAGE_KEY_Days)) && t->type == TUPLE_CSTRING) {
+    copy_string(a->days, sizeof(a->days), t);
+    persist_write_string(pkey(i, F_DAYS), a->days);
+    if (next_day(a, i) && shown) encode();
   }
   if ((t = dict_find(it, MESSAGE_KEY_Status)) && t->type == TUPLE_CSTRING) {
     for (int k = 0; k < MAX_ACCOUNTS; k++) {
@@ -669,7 +744,7 @@ static void inbox_received(DictionaryIterator *it, void *context) {
 static void select_click(ClickRecognizerRef recognizer, void *context) {
   if (s_show_setup) {
     // The companion QR is left with BACK only.
-  } else if (s_nwidths) {
+  } else if (s_nwidths && s_format != FORMAT_QR) {
     // Order on screen: barcode -> QR -> rotated (enum values stay as persisted before).
     static const ViewMode next[MODE_COUNT] = { [MODE_BARS] = MODE_QR, [MODE_QR] = MODE_VERTICAL,
                                                [MODE_VERTICAL] = MODE_BARS };
@@ -738,6 +813,12 @@ static void phone_connection(bool connected) {
   } else {
     clear_updating(STATUS_OFFLINE);
   }
+  redraw();
+}
+
+// Midnight: day codes move on to the new day's (no phone needed).
+static void day_changed(struct tm *tick_time, TimeUnits units_changed) {
+  next_day_all();
   redraw();
 }
 
@@ -826,7 +907,9 @@ static void init(void) {
   app_message_register_inbox_received(inbox_received);
   app_message_register_outbox_failed(outbox_failed);
   connection_service_subscribe((ConnectionHandlers){.pebble_app_connection_handler = phone_connection});
-  app_message_open(256, 64);
+  tick_timer_service_subscribe(DAY_UNIT, day_changed);
+  // Day codes add a few lines of the next days to a message.
+  app_message_open(512, 64);
   app_timer_register(300, initial_request, NULL);
 }
 

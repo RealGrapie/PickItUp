@@ -63,6 +63,7 @@ class LoginActivity : ComponentActivity() {
     companion object {
         const val EXTRA_URL = "url"
         const val EXTRA_ACCOUNT = "account"
+        private const val READ_TIMEOUT_MS = 3000L
 
         /** The site is open here: background fetches wait, two pages must not rotate one login pair. */
         @Volatile private var openCount = 0
@@ -162,14 +163,39 @@ class LoginActivity : ComponentActivity() {
         override fun handleOnBackPressed() = web.goBack()
     }
 
+    private val ozon get() = account.provider == Provider.OZON
+    /** When the in-flight localStorage read (WB) started, 0 = none. A read sent while the page
+     *  navigates never calls back, so a stale one is given up after [READ_TIMEOUT_MS]. */
+    private var readingSince = 0L
+
     private fun checkLoggedIn() {
-        if (finishing || !OzonClient.isLoggedIn(account)) return
+        if (finishing) return
+        if (!ozon) {
+            // Wildberries: the site keeps the token in localStorage once WB ID sends it back here.
+            val now = System.currentTimeMillis()
+            if (readingSince != 0L && now - readingSince < READ_TIMEOUT_MS) return
+            readingSince = now
+            WbClient.readToken(web) { t ->
+                readingSince = 0L
+                if (finishing || t == null || WbClient.expiry(t) <= System.currentTimeMillis()) return@readToken
+                if (!wasGuest && t == startToken) return@readToken
+                WbClient.saveToken(account, t)
+                DebugLog.d("site", "WB login detected, closing")
+                loggedIn()
+            }
+            return
+        }
+        if (!OzonClient.isLoggedIn(account)) return
         if (!wasGuest && OzonClient.accessToken(account) == startToken) return
-        finishing = true
-        WebProfiles.cookies(account.profile).flush()
         DebugLog.tokens("site", "login detected, closing", account)
         // A new login, not a lost rotation: the main screen refreshes before this page is gone.
         OzonClient.noteLogin(account)
+        loggedIn()
+    }
+
+    private fun loggedIn() {
+        finishing = true
+        WebProfiles.cookies(account.profile).flush()
         // Now, not in onDestroy: that runs only after the main screen has resumed.
         account.setLoggedIn(true)
         setResult(RESULT_OK, Intent().putExtra(EXTRA_ACCOUNT, account.id))
@@ -181,9 +207,13 @@ class LoginActivity : ComponentActivity() {
         account = Accounts.byId(intent.getStringExtra(EXTRA_ACCOUNT)) ?: Accounts.active
         openCount++
         counted = true
-        startPrint = OzonClient.currentPrint(account)
+        if (ozon) startPrint = OzonClient.currentPrint(account)
         web = WebView(this).also { WebProfiles.apply(it, account.profile) }
-        OzonClient.configure(web, account)
+        // Without MATCH_PARENT the WebView is WRAP_CONTENT inside AndroidView and pages report a
+        // 0 px tall viewport to CSS: Wildberries' login (html{height:100%;overflow:hidden}) was blank.
+        web.layoutParams = android.view.ViewGroup.LayoutParams(
+            android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+        account.provider.client.configure(web, account)
         val pageUrl = intent.getStringExtra(EXTRA_URL)
         val loginMode = pageUrl == null
         web.webViewClient = object : WebViewClient() {
@@ -257,10 +287,10 @@ class LoginActivity : ComponentActivity() {
             }
         }
         DebugLog.d("site", "opened for account $account, ${if (loginMode) "login" else "page " + DebugLog.url(pageUrl)}")
-        DebugLog.tokens("site", "tokens at open", account)
+        if (ozon) DebugLog.tokens("site", "tokens at open", account)
         if (loginMode) {
-            wasGuest = !OzonClient.isLoggedIn(account)
-            startToken = OzonClient.accessToken(account)
+            wasGuest = !account.provider.client.isLoggedIn(account)
+            startToken = if (ozon) OzonClient.accessToken(account) else WbClient.token(account)
             handler.postDelayed(loginWatcher, 1000)
         }
         onBackPressedDispatcher.addCallback(this, webBack)
@@ -275,7 +305,7 @@ class LoginActivity : ComponentActivity() {
                 enableEdgeToEdge(style, style)
             }
             PickItUpTheme {
-                Page(if (loginMode) s.loginTitle else pageTitle.value ?: s.ordersTitle, if (loginMode) s.loginHint else null, s)
+                Page(if (loginMode) account.provider.text(s.loginTitle) else pageTitle.value ?: s.ordersTitle, if (loginMode) s.loginHint else null, s)
             }
         }
 
@@ -427,8 +457,18 @@ class LoginActivity : ComponentActivity() {
         DebugLog.d("ui", "LoginActivity " + if (isFinishing) "closed" else "hidden")
         // The process may be frozen or killed soon after: a pair the page rotated must be on disk.
         WebProfiles.cookies(account.profile).flush()
-        OzonClient.noteTokens(account)
-        if (!finishing) account.setLoggedIn(OzonClient.isLoggedIn(account))
+        if (ozon) {
+            OzonClient.noteTokens(account)
+            if (!finishing) account.setLoggedIn(OzonClient.isLoggedIn(account))
+        } else if (!finishing) {
+            // Any WB page (orders) may have renewed the token: keep the newest valid one.
+            WbClient.readToken(web) { t ->
+                if (t != null && t != WbClient.token(account) && WbClient.expiry(t) > System.currentTimeMillis()) {
+                    WbClient.saveToken(account, t)
+                    account.setLoggedIn(true)
+                }
+            }
+        }
         // The screen below may refresh as soon as it resumes (onDestroy comes later).
         if (isFinishing) uncount()
     }
@@ -437,9 +477,14 @@ class LoginActivity : ComponentActivity() {
         runCatching { connectivity.unregisterNetworkCallback(network) }
         handler.removeCallbacksAndMessages(null)
         uncount()
-        DebugLog.tokens("site", "closed", account)
-        // Not destroyed at once: a request still in flight may bring a rotated login pair.
-        OzonClient.retire(web, account, startPrint)
+        if (ozon) {
+            DebugLog.tokens("site", "closed", account)
+            // Not destroyed at once: a request still in flight may bring a rotated login pair.
+            OzonClient.retire(web, account, startPrint)
+        } else {
+            WebProfiles.cookies(account.profile).flush()
+            web.destroy()
+        }
         super.onDestroy()
     }
 }

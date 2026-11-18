@@ -27,6 +27,10 @@ object WatchKeys {
     const val INDEX = 10006u
     const val COUNT = 10007u
     const val NAME = 10008u
+    /** How to draw the code: 0 = Code 128 (Ozon), 1 = QR (Wildberries). */
+    const val FORMAT = 10009u
+    /** The days after today's code: "<from epoch s>|<code>|<text>" lines, for the midnight switch. */
+    const val DAYS = 10010u
 
     const val REQUEST_CACHED = 1
     const val REQUEST_REFRESH = 2
@@ -153,19 +157,19 @@ object BarcodeSync {
             account.loginNeeded.value = true
             return@withLock FetchResult.LoginNeeded
         }
-        if (LoginActivity.isOpen) {
+        if (LoginActivity.isOpen && account.provider == Provider.OZON) {
             // Two pages rotating one login pair at once: the cookie jar may keep the older new pair.
             BarcodeStore.log(AppSettings.strings().logLoginOpen, account)
             return@withLock FetchResult.Error(AppSettings.strings().logLoginOpen)
         }
         if (Net.vpnActive(context)) {
             // Ozon sees the VPN's address: a login from abroad may get ended. Split tunneling is fine.
-            BarcodeStore.log(AppSettings.strings().logVpn, account)
+            BarcodeStore.log(account.provider.text(AppSettings.strings().logVpn), account)
             return@withLock FetchResult.Vpn
         }
         account.busy.value = true
         val s = AppSettings.strings()
-        BarcodeStore.log(s.logFetching, account)
+        BarcodeStore.log(account.provider.text(s.logFetching), account)
         val r = try {
             account.provider.client.fetch(context, account)
         } finally {
@@ -173,18 +177,18 @@ object BarcodeSync {
         }
         // Chromium is loaded by now anyway; Ozon may have ended the session meanwhile.
         account.setLoggedIn(r is FetchResult.Ok || account.provider.client.isLoggedIn(account))
-        // The probe follows the first account's session only.
-        if (account == Accounts.active) SessionProbe.onFetch(context, r)
+        // The probe follows the first account's Ozon session only.
+        if (account == Accounts.active && account.provider == Provider.OZON) SessionProbe.onFetch(context, r)
         when (r) {
             is FetchResult.Ok -> {
-                account.save(r.barcode)
+                if (r.days.isNotEmpty()) account.saveDays(r.days) else account.save(r.barcode)
                 account.loginNeeded.value = false
                 // Only the tail: the journal is on the debug screen, which ends up in screenshots.
-                BarcodeStore.log(s.logFetched("…" + r.barcode.code.takeLast(4)), account)
+                BarcodeStore.log(account.provider.text(s.logFetched("…" + r.barcode.code.takeLast(4))), account)
             }
             FetchResult.LoginNeeded -> {
                 account.loginNeeded.value = true
-                BarcodeStore.log(s.logLoginNeeded, account)
+                BarcodeStore.log(account.provider.text(s.logLoginNeeded), account)
             }
             is FetchResult.Error -> BarcodeStore.log(s.logError(r.message), account)
             FetchResult.Vpn -> Unit  // never comes from OzonClient
@@ -205,6 +209,8 @@ object BarcodeSync {
         // No Pebble (setting off): don't even bind to the Pebble app.
         if (!force && !BarcodeStore.watchEnabled.value) return
         val accounts = Accounts.list.value
+        // A day code whose midnight has passed: today's goes out, not yesterday's.
+        accounts.forEach { it.updateShown() }
         val sender = DefaultPebbleSender(context.applicationContext)
         var res: Map<*, TransmissionResult>? = null
         try {
@@ -216,11 +222,16 @@ object BarcodeSync {
                 val dict = buildMap {
                     put(WatchKeys.INDEX, PebbleDictionaryItem.Int32(i))
                     put(WatchKeys.COUNT, PebbleDictionaryItem.Int32(accounts.size))
-                    put(WatchKeys.NAME, PebbleDictionaryItem.Text(WatchNames.label(account, i)))
+                    put(WatchKeys.NAME, PebbleDictionaryItem.Text(WatchNames.label(account, i, accounts.size)))
                     if (b != null) {
                         put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
                         put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))
                         put(WatchKeys.UPDATED, PebbleDictionaryItem.Int32((b.fetchedAt / 1000).toInt()))
+                        put(WatchKeys.FORMAT, PebbleDictionaryItem.Int32(b.format.watchValue))
+                        // Only for day codes: a watchapp before 1.6 has a 256-byte inbox and would drop
+                        // the whole message (Ozon messages stay as small as they were).
+                        val next = if (BarcodeStore.demo.value) emptyList() else account.upcoming()
+                        if (b.format == CodeFormat.QR) put(WatchKeys.DAYS, PebbleDictionaryItem.Text(WatchNames.days(next)))
                     } else if (!account.loggedIn.value) {
                         // Logged out: an empty code makes the watch forget the one it stored.
                         put(WatchKeys.CODE, PebbleDictionaryItem.Text(""))

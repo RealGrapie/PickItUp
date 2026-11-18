@@ -51,6 +51,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -160,6 +161,21 @@ class DebugActivity : BaseActivity() {
                     InfoRow(s.stateFetchedAt, barcode?.let { fmt.format(Date(it.fetchedAt)) } ?: "—")
                     InfoRow(s.stateStale(scheduleText(s, short = true)), if (BarcodeSync.isStale(barcode)) s.yes else s.no)
                     InfoRow(s.stateBusy, if (aBusy) s.yes else s.no)
+                    if (a.provider == Provider.WB) {
+                        // Re-read after a renewal: the token lives in prefs, not in a flow.
+                        var renewed by remember { mutableIntStateOf(0) }
+                        val until = remember(renewed, lifecycleState, aBusy) { WbClient.token(a)?.let { DebugLog.at(WbClient.expiry(it)) } ?: "—" }
+                        InfoRow(s.stateWbToken, until)
+                        var renewing by remember { mutableStateOf(false) }
+                        TextButton(
+                            onClick = {
+                                renewing = true
+                                lifecycleScope.launch { WbClient.renew(this@DebugActivity, a); renewing = false; renewed++ }
+                            },
+                            enabled = loggedIn && !renewing,
+                            modifier = Modifier.padding(start = 4.dp),
+                        ) { Text(s.wbRenewNow) }
+                    }
                 }
                 if (accounts.size > 1) Spacer(Modifier.height(10.dp))
                 InfoRow(s.statePebble, s.watchStatus(watchStatus))

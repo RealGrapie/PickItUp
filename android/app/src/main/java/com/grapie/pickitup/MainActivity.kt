@@ -195,7 +195,14 @@ class MainActivity : BaseActivity() {
                 }
                 Spacer(Modifier.height(32.dp))
                 AnimatedVisibility(shown, enter = fadeIn(tween(400, 300)) + slideInVertically(tween(400, 300)) { it }) {
-                    PillButton(s.login, R.drawable.ic_login, ::login, Modifier.widthIn(min = 220.dp))
+                    // One button per marketplace: the first account becomes the one picked.
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        PillButton(s.login, R.drawable.ic_login, { login(Accounts.switchProvider(Accounts.active, Provider.OZON)) }, Modifier.widthIn(min = 240.dp))
+                        PillButton(
+                            Provider.WB.text(s.login), R.drawable.ic_login,
+                            { login(Accounts.switchProvider(Accounts.active, Provider.WB)) }, Modifier.widthIn(min = 240.dp), tonal = true,
+                        )
+                    }
                 }
                 Spacer(Modifier.weight(1.3f))
                 val vpn by Net.vpn.collectAsStateWithLifecycle()
@@ -285,7 +292,7 @@ class MainActivity : BaseActivity() {
                     }
                     if (accounts.size > 1) PagerDots(accounts.size, pager.currentPage)
 
-                    AnimatedVisibility(loginNeeded && barcode != null) { SessionCard(account) }
+                    AnimatedVisibility(loginNeeded) { SessionCard(account, fresh = barcode == null) }
                     AnimatedVisibility(vpn && !BarcodeStore.demo.value) { VpnCard() }
                     UpdateCard(skippable = true)
 
@@ -337,7 +344,7 @@ class MainActivity : BaseActivity() {
 
                     if (canRefresh) {
                         PillButton(
-                            s.myOrders, R.drawable.ic_shopping_bag,
+                            account.provider.text(s.myOrders), R.drawable.ic_shopping_bag,
                             {
                                 if (BarcodeStore.demo.value) Toast.makeText(this@MainActivity, s.demoOrders, Toast.LENGTH_SHORT).show()
                                 else LoginActivity.openPage(this@MainActivity, account, account.provider.ordersUrl)
@@ -415,9 +422,10 @@ class MainActivity : BaseActivity() {
                     }
                     FilledTonalIconButton(onClick = onEnlarge) { Ic(R.drawable.ic_fullscreen, description = s.enlarge) }
                 }
-                BarcodeView(barcode.code, Modifier.fillMaxWidth().height(132.dp))
+                val qr = barcode.format == CodeFormat.QR
+                PickupCodeView(barcode, Modifier.fillMaxWidth().height(if (qr) 200.dp else 132.dp))
                 Text(
-                    s.showToStaff, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    if (qr) s.showQrToStaff else s.showToStaff, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -438,14 +446,14 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun SessionCard(account: Account) {
+    private fun SessionCard(account: Account, fresh: Boolean) {
         val s = LocalStrings.current
         Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(s.sessionTitle, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
-                Text(s.sessionText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(account.provider.text(if (fresh) s.newLoginTitle else s.sessionTitle), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(if (fresh) s.newLoginText else s.sessionText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
                 Spacer(Modifier.height(4.dp))
-                PillButton(s.login, R.drawable.ic_login, { login(account) })
+                PillButton(account.provider.text(s.login), R.drawable.ic_login, { login(account) })
             }
         }
     }
@@ -494,7 +502,7 @@ class MainActivity : BaseActivity() {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    BarcodeView(b.code, Modifier.fillMaxWidth().height(220.dp), RoundedCornerShape(0.dp))
+                    PickupCodeView(b, Modifier.fillMaxWidth().height(if (b.format == CodeFormat.QR) 340.dp else 220.dp), RoundedCornerShape(0.dp))
                     Spacer(Modifier.height(16.dp))
                     Text(b.visible, color = Color.Black, fontSize = 28.sp, fontFamily = FontFamily.Monospace)
                     Spacer(Modifier.height(32.dp))

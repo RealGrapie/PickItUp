@@ -63,5 +63,7 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.pebblekit)
+  implementation(libs.zxing.core)
   testImplementation(libs.junit)
+  testImplementation(libs.org.json)
 }

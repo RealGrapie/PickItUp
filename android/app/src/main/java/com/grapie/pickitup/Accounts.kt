@@ -4,23 +4,47 @@ import android.content.Context
 import android.content.SharedPreferences
 import kotlinx.coroutines.flow.MutableStateFlow
 
-/** What a provider's client does for one account; Ozon is the only one so far. */
+/** What a provider's client does for one account. */
 interface ProviderClient {
-    /** One request for the account's pickup code, through its own WebView profile. */
+    /** One request for the account's pickup code (Ozon: through its own WebView profile). */
     suspend fun fetch(context: Context, account: Account): FetchResult
-    /** From the account's cookies: loads Chromium, so only where a WebView runs anyway. */
+    /** Ozon: from the account's cookies, which loads Chromium, so only where a WebView runs anyway. */
     fun isLoggedIn(account: Account): Boolean
     fun logout(account: Account)
+
+    /** A WebView showing this marketplace's site (login page, orders), before it loads anything. */
+    @android.annotation.SuppressLint("SetJavaScriptEnabled")
+    fun configure(web: android.webkit.WebView, account: Account) {
+        web.settings.javaScriptEnabled = true
+        web.settings.domStorageEnabled = true
+        // Look like mobile Chrome rather than an embedded WebView.
+        web.settings.userAgentString = web.settings.userAgentString.replace("; wv", "")
+        WebProfiles.cookies(account.profile).setAcceptThirdPartyCookies(web, true)
+    }
 }
 
-/** A marketplace the app can get a pickup code from. */
-enum class Provider(val id: String, val title: String, val homeUrl: String, val loginUrl: String, val ordersUrl: String) {
+/**
+ * A marketplace the app can get a pickup code from. [title] is the short name for headers
+ * ("WB · Мама", "WB: Mama" on the watch), [fullName] the one in sentences ("Войти в Wildberries").
+ */
+enum class Provider(
+    val id: String, val title: String, val fullName: String,
+    val homeUrl: String, val loginUrl: String, val ordersUrl: String,
+) {
     // The bare Ozon ID form: one tap shorter than going through the account page.
-    OZON("ozon", "Ozon", "https://www.ozon.ru/", "https://www.ozon.ru/ozonid-lite", "https://www.ozon.ru/my/orderlist");
+    OZON("ozon", "Ozon", "Ozon", "https://www.ozon.ru/", "https://www.ozon.ru/ozonid-lite", "https://www.ozon.ru/my/orderlist"),
+    // The account page sends a guest to WB ID (phone + SMS) and comes back here once logged in.
+    WB("wb", "WB", "Wildberries", "https://www.wildberries.ru/", "https://www.wildberries.ru/lk", "https://www.wildberries.ru/lk/myorders/delivery");
 
     val client: ProviderClient get() = when (this) {
         OZON -> OzonClient
+        WB -> WbClient
     }
+
+    /** One of the app's texts about Ozon, about this marketplace instead (the name isn't declined in RU). */
+    /** An Ozon text for this marketplace: the name, and "code" where Ozon has a barcode (WB = a QR). */
+    fun text(s: String) = if (this == OZON) s else s.replace("Ozon", fullName)
+        .replace("штрихкод", "код").replace("Штрихкод", "Код").replace("barcode", "code").replace("Barcode", "Code")
 
     companion object {
         fun byId(id: String?) = entries.firstOrNull { it.id == id }
@@ -45,6 +69,7 @@ class Account internal constructor(
     /** Label on cards and rows: "Ozon" or "Ozon · Мама". */
     fun label(name: String = this.name.value) = if (name.isBlank()) provider.title else "${provider.title} · $name"
 
+    /** Today's code (Ozon: the one code there is). */
     val barcode = MutableStateFlow<Barcode?>(null)
     /** What the UI and the watch show: [barcode], or a sample code in demo mode. */
     val shown = MutableStateFlow<Barcode?>(null)
@@ -52,9 +77,13 @@ class Account internal constructor(
     /** The last request said the login is gone (the main screen offers to log in again). */
     val loginNeeded = MutableStateFlow(false)
     val busy = MutableStateFlow(false)
+    /** One code per day, oldest first (Wildberries); empty for Ozon. */
+    var days: List<Barcode> = emptyList()
+        private set
 
     init {
-        barcode.value = prefs.getString("code", null)?.let {
+        days = prefs.getString("days", null)?.let(::parseDays).orEmpty()
+        barcode.value = if (days.isNotEmpty()) current(days) else prefs.getString("code", null)?.let {
             Barcode(it, prefs.getString("visible", it)!!, prefs.getLong("fetchedAt", 0))
         }
         loggedIn.value = prefs.getBoolean("loggedIn", false)
@@ -68,19 +97,57 @@ class Account internal constructor(
     }
 
     fun save(b: Barcode) {
-        prefs.edit().putString("code", b.code).putString("visible", b.visible).putLong("fetchedAt", b.fetchedAt).apply()
+        prefs.edit().putString("code", b.code).putString("visible", b.visible).putLong("fetchedAt", b.fetchedAt).remove("days").apply()
+        days = emptyList()
         barcode.value = b
         updateShown()
     }
 
+    /** A week of day codes: [barcode] follows the calendar from now on (see [updateShown]). */
+    fun saveDays(list: List<Barcode>) {
+        val sorted = list.sortedBy { it.validFrom }
+        prefs.edit().putString("days", daysJson(sorted)).remove("code").remove("visible").remove("fetchedAt").apply()
+        days = sorted
+        barcode.value = current(sorted)
+        updateShown()
+    }
+
+    /** The days still to come after today's, for the watch to switch to at midnight by itself. */
+    fun upcoming(now: Long = System.currentTimeMillis()): List<Barcode> = days.filter { it.validFrom > now }
+
     fun clear() {
-        prefs.edit().remove("code").remove("visible").remove("fetchedAt").apply()
+        prefs.edit().remove("code").remove("visible").remove("fetchedAt").remove("days").apply()
+        days = emptyList()
         barcode.value = null
         updateShown()
     }
 
+    /** Also moves to the next day's code once its midnight has passed. */
     internal fun updateShown() {
-        shown.value = if (BarcodeStore.demo.value) BarcodeStore.demoBarcode() else barcode.value
+        if (days.isNotEmpty()) current(days).let { if (it != barcode.value) barcode.value = it }
+        shown.value = if (BarcodeStore.demo.value) BarcodeStore.demoBarcode(provider) else barcode.value
+    }
+
+    private companion object {
+        /** The latest day that has begun; before the first one (clock off), the first. */
+        fun current(days: List<Barcode>, now: Long = System.currentTimeMillis()) =
+            days.lastOrNull { it.validFrom <= now } ?: days.first()
+
+        fun daysJson(list: List<Barcode>) = org.json.JSONArray().apply {
+            list.forEach {
+                put(org.json.JSONObject().put("code", it.code).put("visible", it.visible).put("fetchedAt", it.fetchedAt)
+                    .put("format", it.format.name).put("validFrom", it.validFrom))
+            }
+        }.toString()
+
+        fun parseDays(json: String): List<Barcode> = runCatching {
+            val a = org.json.JSONArray(json)
+            (0 until a.length()).map { i ->
+                val o = a.getJSONObject(i)
+                Barcode(o.getString("code"), o.getString("visible"), o.getLong("fetchedAt"),
+                    runCatching { CodeFormat.valueOf(o.getString("format")) }.getOrDefault(CodeFormat.QR), o.getLong("validFrom"))
+            }
+        }.getOrDefault(emptyList())
     }
 
     /** Per-account values of the provider's client (e.g. when the login pair was last renewed). */
@@ -138,6 +205,18 @@ object Accounts {
         if (account.profile != WebProfiles.DEFAULT) runCatching { androidx.webkit.ProfileStore.getInstance().deleteProfile(account.profile) }
             .onFailure { DebugLog.d("accounts", "profile ${account.profile} kept: ${it.javaClass.simpleName}") }
         DebugLog.d("accounts", "removed ${account.id}")
+    }
+
+    /** The one account, still empty, moved to another marketplace (onboarding: "log in to Wildberries"). */
+    fun switchProvider(account: Account, provider: Provider): Account {
+        if (account.provider == provider || account !in list.value) return account
+        prefs.edit().putString("${account.id}.provider", provider.id).commit()
+        val moved = load(account.id)!!
+        moved.setLoggedIn(provider.client.isLoggedIn(moved))
+        moved.updateShown()
+        list.value = list.value.map { if (it.id == account.id) moved else it }
+        DebugLog.d("accounts", "${account.id} moved to ${provider.id}")
+        return moved
     }
 
     fun rename(account: Account, name: String) {

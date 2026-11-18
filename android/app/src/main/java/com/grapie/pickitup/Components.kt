@@ -180,6 +180,34 @@ fun BarcodeView(code: String, modifier: Modifier = Modifier, shape: Shape = Roun
     }
 }
 
+/**
+ * Pickup QR (Wildberries) for scanning from the phone screen: whole-pixel modules, a 4-module
+ * white quiet zone, black on white whatever the theme.
+ */
+@Composable
+fun QrView(code: String, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(20.dp)) {
+    val matrix = remember(code) {
+        runCatching {
+            com.google.zxing.qrcode.encoder.Encoder.encode(code, com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M).matrix
+        }.getOrNull()
+    } ?: return
+    Canvas(modifier.clip(shape).background(Color.White)) {
+        val n = matrix.width
+        val scale = maxOf(1, (minOf(size.width, size.height) / (n + 8)).toInt())
+        val x0 = ((size.width - n * scale) / 2).toInt().toFloat()
+        val y0 = ((size.height - n * scale) / 2).toInt().toFloat()
+        for (y in 0 until n) for (x in 0 until n) {
+            if (matrix.get(x, y).toInt() == 1)
+                drawRect(Color.Black, Offset(x0 + x * scale, y0 + y * scale), Size(scale.toFloat(), scale.toFloat()))
+        }
+    }
+}
+
+/** The code as its marketplace scans it: Code 128 (Ozon) or a QR (Wildberries). */
+@Composable
+fun PickupCodeView(b: Barcode, modifier: Modifier = Modifier, shape: Shape = RoundedCornerShape(20.dp)) =
+    if (b.format == CodeFormat.QR) QrView(b.code, modifier, shape) else BarcodeView(b.code, modifier, shape)
+
 /** A release body split for the update card: [highlight] for the card, [points] for "What's new". */
 data class ReleaseNotes(val highlight: String?, val points: List<String>)
 

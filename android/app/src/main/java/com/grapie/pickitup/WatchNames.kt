@@ -21,10 +21,24 @@ object WatchNames {
         }
     }.trim().replace(Regex(" +"), " ")
 
-    /** Header / menu line for account number [index] (0-based): "OZON: Mama", or "OZON 2" without a name. */
-    fun label(account: Account, index: Int): String {
+    /**
+     * Header / menu line for account number [index] (0-based) of [count]: "OZON: Mama", or "OZON 2"
+     * without a name; the only account: "WB pickup code" (watchapps before 1.6 keep their own header then).
+     */
+    fun label(account: Account, index: Int, count: Int = 2): String {
         val name = ascii(account.name.value)
         val title = account.provider.title.uppercase()
-        return (if (name.isEmpty()) "$title ${index + 1}" else "$title: $name").take(MAX)
+        return when {
+            count == 1 && name.isEmpty() -> "$title pickup code"
+            name.isEmpty() -> "$title ${index + 1}"
+            else -> "$title: $name"
+        }.take(MAX)
     }
+
+    /** Watch storage keeps one value per key up to 256 bytes: this many days fit with room to spare. */
+    private const val MAX_DAYS = 4
+
+    /** The days after today's code as "<from epoch s>|<code>|<text>" lines (watch: next_day()). */
+    fun days(upcoming: List<Barcode>): String =
+        upcoming.take(MAX_DAYS).joinToString("\n") { "${it.validFrom / 1000}|${ascii(it.code)}|${ascii(it.visible)}" }
 }
