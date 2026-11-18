@@ -30,7 +30,26 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   RefreshSchedule.kt    interval / daily refresh math;  RefreshJobService.kt  background job
   Updater.kt            update check (GitHub Releases API) + APK download -> PackageInstaller session
   InstallReceiver.kt    installer session result: shows the system confirmation when needed
+  WearSync.kt           Wear OS: every account's code into one Data Layer item; WearListenerService
+android/wear/  Wear OS app (branch `wearos`, experimental): same applicationId + key as the phone app
+  Codes.kt              Data Layer contract (keep in sync with WearSync.kt), codes cached in prefs
+  MainActivity.kt       one page per account (swipe), barcode in the middle band, max brightness;
+                        tap the code = Code 128 <-> QR (zxing core, level M, remembered);
+                        tap the footer = refresh; "Demo" on the empty screen (emulator, no phone)
+  Code128.kt            copy of the phone's encoder
 ```
+
+- **Wear OS** (`wearos` branch): item `/pickitup/codes` = DataMap list "accounts" (label, code,
+  visible, updated, loggedIn), pushed whenever an account's shown code / name / login changes;
+  the watch sends `/pickitup/request` [kind, index] (1 = refresh stale on open, 2 = refresh one).
+  Modules are whole pixels, the code sized to the chord at the band edge (round screens).
+  Every request from the watch re-pushes the current codes (the Data Layer may have appeared
+  after the last change: Wear OS app installed / watch paired later).
+  Emulator: AVD `Wear_OS_Small_Round` (384x384), paired with a REAL phone: Wear OS by Google on
+  the phone (the Xiaomi test phone has it; Play downloads there need the VPN on), Bluetooth on,
+  `adb -s <phone> forward tcp:5601 tcp:5601`, then Wear OS app -> ⋮ -> "Подключиться к эмулятору".
+  Verified 2026-11-18: real codes on the watch, footer tap -> phone fetch -> new code. `play-services-wearable` pulls
+  fragment 1.0: `androidx.fragment` is pinned (release lint InvalidFragmentVersionForActivityResult).
 
 ## Identity
 

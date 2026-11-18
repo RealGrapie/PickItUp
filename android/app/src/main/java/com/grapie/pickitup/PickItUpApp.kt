@@ -13,6 +13,7 @@ class PickItUpApp : Application() {
         BarcodeStore.init(this)
         Accounts.init(this)  // after BarcodeStore (demo mode); migrates the 1.x login
         Watches.init(this)
+        WearSync.init(this)  // after Accounts
         Updater.init(this)
         Net.init(this)
         SessionProbe.init(this)

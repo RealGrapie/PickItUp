@@ -63,5 +63,10 @@ dependencies {
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.pebblekit)
+  // Wear OS watch app (module :wear): codes go over the Data Layer.
+  implementation(libs.play.services.wearable)
+  implementation(libs.kotlinx.coroutines.play.services)
+  // play-services-base pulls fragment 1.0; ActivityResult (our launchers) needs 1.3+.
+  implementation(libs.androidx.fragment)
   testImplementation(libs.junit)
 }

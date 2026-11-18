@@ -23,3 +23,4 @@ dependencyResolutionManagement {
 rootProject.name = "PickItUp"
 
 include(":app")
+include(":wear")

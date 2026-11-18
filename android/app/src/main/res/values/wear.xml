@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Data Layer capability of the phone app (the Wear OS app may look for it). -->
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>pickitup_phone</item>
+    </string-array>
+</resources>

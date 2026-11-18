@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="no_phone_data">Откройте PickItUp! на телефоне</string>
+    <string name="no_phone_data_hint">Приложение на телефоне входит в Ozon и присылает сюда код</string>
+    <string name="demo">Демо</string>
+    <string name="log_in">Войдите в Ozon на телефоне</string>
+    <string name="no_code">Штрихкода пока нет</string>
+    <string name="updated_today">сегодня %1$s</string>
+    <string name="updated_yesterday">вчера %1$s</string>
+    <string name="updating">Обновляем…</string>
+    <string name="phone_offline">нет связи · %1$s</string>
+    <string name="refresh">Обновить</string>
+</resources>

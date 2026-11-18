@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="no_phone_data">Open PickItUp! on your phone</string>
+    <string name="no_phone_data_hint">The phone app logs in to Ozon and sends the code here</string>
+    <string name="demo">Demo</string>
+    <string name="log_in">Log in to Ozon on your phone</string>
+    <string name="no_code">No barcode yet</string>
+    <string name="updated_today">today %1$s</string>
+    <string name="updated_yesterday">yesterday %1$s</string>
+    <string name="updating">Updating…</string>
+    <string name="phone_offline">offline · %1$s</string>
+    <string name="refresh">Refresh</string>
+    <!-- Data Layer capability: lets the phone app see that this watch has PickItUp! -->
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>pickitup_wear</item>
+    </string-array>
+</resources>

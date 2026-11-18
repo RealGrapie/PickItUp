@@ -95,6 +95,16 @@
                 <action android:name="io.rebble.pebblekit2.RECEIVE_DATA_FROM_WATCH" />
             </intent-filter>
         </service>
+
+        <!-- Requests from the Wear OS app (module :wear) over the Data Layer. -->
+        <service
+            android:name=".WearListenerService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data android:scheme="wear" android:host="*" android:pathPrefix="/pickitup" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>
