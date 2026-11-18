@@ -122,7 +122,6 @@ class SettingsActivity : BaseActivity() {
         val language by AppSettings.language.collectAsStateWithLifecycle()
         // Account ids: the open account sheet and the confirmations it leads to.
         var sheetFor by rememberSaveable { mutableStateOf<String?>(null) }
-        var confirmLogout by rememberSaveable { mutableStateOf<String?>(null) }
         var confirmRemove by rememberSaveable { mutableStateOf<String?>(null) }
         val accounts by Accounts.list.collectAsStateWithLifecycle()
         var showAbout by rememberSaveable { mutableStateOf(false) }
@@ -272,29 +271,7 @@ class SettingsActivity : BaseActivity() {
 
         Accounts.byId(sheetFor)?.let { a -> AccountSheet(a, onClose = { sheetFor = null },
             onLogin = { sheetFor = null; login(a) },
-            onLogout = { sheetFor = null; confirmLogout = a.id },
             onRemove = { sheetFor = null; confirmRemove = a.id }) }
-
-        Accounts.byId(confirmLogout)?.let { a ->
-            AlertDialog(
-                onDismissRequest = { confirmLogout = null },
-                icon = { Ic(R.drawable.ic_logout) },
-                title = { Text(a.provider.text(s.logoutTitle)) },
-                text = { Text(a.provider.text(s.logoutText)) },
-                confirmButton = {
-                    TextButton(onClick = {
-                        confirmLogout = null
-                        a.provider.client.logout(a)
-                        a.clear()
-                        a.loginNeeded.value = true
-                        BarcodeStore.log(a.provider.text(s.logLoggedOut), a)
-                        // If the watchapp is open it forgets the code now, else on its next request.
-                        BarcodeSync.sendToWatchAsync(this@SettingsActivity)
-                    }) { Text(s.logoutConfirm, color = MaterialTheme.colorScheme.error) }
-                },
-                dismissButton = { TextButton(onClick = { confirmLogout = null }) { Text(s.cancel) } },
-            )
-        }
 
         Accounts.byId(confirmRemove)?.let { a ->
             AlertDialog(
@@ -305,8 +282,16 @@ class SettingsActivity : BaseActivity() {
                 confirmButton = {
                     TextButton(onClick = {
                         confirmRemove = null
-                        Accounts.remove(a)
                         BarcodeStore.log(s.logRemoved, a)
+                        // The last one stays as an empty slot: the main screen shows the onboarding.
+                        if (Accounts.list.value.size > 1) Accounts.remove(a)
+                        else {
+                            a.provider.client.logout(a)
+                            a.clear()
+                            Accounts.rename(a, "")
+                            a.loginNeeded.value = false
+                        }
+                        // If the watchapp is open it forgets the code now, else on its next request.
                         BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.removeAccountConfirm, color = MaterialTheme.colorScheme.error) }
                 },
@@ -315,13 +300,12 @@ class SettingsActivity : BaseActivity() {
         }
     }
 
-    /** One account: its name, log in or out, remove (not the last one). */
+    /** One account: its name, log in (while logged out), remove (logs out too; the last one becomes empty). */
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    private fun AccountSheet(a: Account, onClose: () -> Unit, onLogin: () -> Unit, onLogout: () -> Unit, onRemove: () -> Unit) {
+    private fun AccountSheet(a: Account, onClose: () -> Unit, onLogin: () -> Unit, onRemove: () -> Unit) {
         val s = LocalStrings.current
         val loggedIn by a.loggedIn.collectAsStateWithLifecycle()
-        val accounts by Accounts.list.collectAsStateWithLifecycle()
         var name by rememberSaveable(a.id) { mutableStateOf(a.name.value) }
         fun close() {
             Accounts.rename(a, name)
@@ -344,9 +328,8 @@ class SettingsActivity : BaseActivity() {
                     singleLine = true, modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
                 )
                 Spacer(Modifier.height(8.dp))
-                if (loggedIn) NavRow(R.drawable.ic_logout, a.provider.text(s.logout), null, dangerColor()) { Accounts.rename(a, name); onLogout() }
-                else NavRow(R.drawable.ic_login, a.provider.text(s.login), null) { Accounts.rename(a, name); onLogin() }
-                if (accounts.size > 1) NavRow(R.drawable.ic_delete, s.removeAccount, null, dangerColor()) { onRemove() }
+                if (!loggedIn) NavRow(R.drawable.ic_login, a.provider.text(s.login), null) { Accounts.rename(a, name); onLogin() }
+                NavRow(R.drawable.ic_delete, s.removeAccount, null, dangerColor()) { onRemove() }
             }
         }
     }

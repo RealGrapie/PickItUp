@@ -88,11 +88,13 @@ object BarcodeSync {
         }
         val accounts = Accounts.list.value
         val target = accounts.getOrNull(index ?: 0) ?: accounts.first()
-        // With the Ozon site open in the app the cached codes are shown; the site page owns the session.
-        val toFetch = if (LoginActivity.isOpen) emptyList() else accounts.filter { a ->
+        // With a site open in the app Ozon codes come from the cache: that page owns the Ozon session
+        // (two pages rotating one login pair lose it). Wildberries is a plain request, never blocked.
+        val toFetch = accounts.filter { a ->
             val cached = a.shown.value
             val fresh = cached != null && System.currentTimeMillis() - cached.fetchedAt < FRESH_MS
-            (a.loggedIn.value || BarcodeStore.demo.value) &&
+            !(LoginActivity.isOpen && a.provider == Provider.OZON) &&
+                (a.loggedIn.value || BarcodeStore.demo.value) &&
                 (kind == WatchKeys.REQUEST_REFRESH && a == target && !fresh || isStale(cached))
         }
         DebugLog.d("watch", "request kind=$kind index=$index loginOpen=${LoginActivity.isOpen} -> fetch ${toFetch.map { accounts.indexOf(it) }}")
@@ -222,7 +224,7 @@ object BarcodeSync {
                 val dict = buildMap {
                     put(WatchKeys.INDEX, PebbleDictionaryItem.Int32(i))
                     put(WatchKeys.COUNT, PebbleDictionaryItem.Int32(accounts.size))
-                    put(WatchKeys.NAME, PebbleDictionaryItem.Text(WatchNames.label(account, i, accounts.size)))
+                    put(WatchKeys.NAME, PebbleDictionaryItem.Text(WatchNames.label(account, accounts)))
                     if (b != null) {
                         put(WatchKeys.CODE, PebbleDictionaryItem.Text(b.code))
                         put(WatchKeys.VISIBLE, PebbleDictionaryItem.Text(b.visible))

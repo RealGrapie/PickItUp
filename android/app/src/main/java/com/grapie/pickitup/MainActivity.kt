@@ -288,7 +288,7 @@ class MainActivity : BaseActivity() {
                         val pageBusy by a.busy.collectAsStateWithLifecycle()
                         val name by a.name.collectAsStateWithLifecycle()
                         val title = a.provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
-                        BarcodeCard(b, pageBusy, title, onEnlarge = { fullscreen = true })
+                        BarcodeCard(b, pageBusy, title, a.provider, onEnlarge = { fullscreen = true })
                     }
                     if (accounts.size > 1) PagerDots(accounts.size, pager.currentPage)
 
@@ -388,7 +388,7 @@ class MainActivity : BaseActivity() {
     }
 
     @Composable
-    private fun BarcodeCard(barcode: Barcode?, busy: Boolean, title: String, onEnlarge: () -> Unit) {
+    private fun BarcodeCard(barcode: Barcode?, busy: Boolean, title: String, provider: Provider, onEnlarge: () -> Unit) {
         val s = LocalStrings.current
         val source = remember { MutableInteractionSource() }
         val shape = MaterialTheme.shapes.extraLarge
@@ -405,7 +405,7 @@ class MainActivity : BaseActivity() {
             ) {
                 if (barcode == null) {
                     Text(
-                        if (busy) s.gettingBarcode else s.noBarcode,
+                        provider.text(if (busy) s.gettingBarcode else s.noBarcode),
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -451,7 +451,7 @@ class MainActivity : BaseActivity() {
         Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.large) {
             Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(account.provider.text(if (fresh) s.newLoginTitle else s.sessionTitle), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
-                Text(if (fresh) s.newLoginText else s.sessionText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                Text(account.provider.text(if (fresh) s.newLoginText else s.sessionText), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
                 Spacer(Modifier.height(4.dp))
                 PillButton(account.provider.text(s.login), R.drawable.ic_login, { login(account) })
             }

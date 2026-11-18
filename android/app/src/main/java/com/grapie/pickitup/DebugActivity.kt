@@ -157,7 +157,7 @@ class DebugActivity : BaseActivity() {
                         a.label(name), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 2.dp),
                     )
-                    InfoRow(s.stateLogin, if (loggedIn) s.loginOkValue else s.loginNeededValue)
+                    InfoRow(a.provider.text(s.stateLogin), if (loggedIn) s.loginOkValue else s.loginNeededValue)
                     InfoRow(s.stateFetchedAt, barcode?.let { fmt.format(Date(it.fetchedAt)) } ?: "—")
                     InfoRow(s.stateStale(scheduleText(s, short = true)), if (BarcodeSync.isStale(barcode)) s.yes else s.no)
                     InfoRow(s.stateBusy, if (aBusy) s.yes else s.no)

@@ -22,15 +22,18 @@ object WatchNames {
     }.trim().replace(Regex(" +"), " ")
 
     /**
-     * Header / menu line for account number [index] (0-based) of [count]: "OZON: Mama", or "OZON 2"
-     * without a name; the only account: "WB pickup code" (watchapps before 1.6 keep their own header then).
+     * Header / menu line for [account] among [accounts]: "OZON: Mama"; without a name just "WB", as
+     * on the phone ("WB 2" only when another unnamed account of that marketplace needs telling
+     * apart); the only account: "WB pickup code" (watchapps before 1.6 keep their own header then).
      */
-    fun label(account: Account, index: Int, count: Int = 2): String {
+    fun label(account: Account, accounts: List<Account>): String {
         val name = ascii(account.name.value)
         val title = account.provider.title.uppercase()
+        val twins = accounts.filter { it.provider == account.provider && ascii(it.name.value).isEmpty() }
         return when {
-            count == 1 && name.isEmpty() -> "$title pickup code"
-            name.isEmpty() -> "$title ${index + 1}"
+            accounts.size == 1 && name.isEmpty() -> "$title pickup code"
+            name.isEmpty() && twins.size > 1 -> "$title ${twins.indexOf(account) + 1}"
+            name.isEmpty() -> title
             else -> "$title: $name"
         }.take(MAX)
     }

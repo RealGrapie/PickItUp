@@ -845,7 +845,7 @@ static void menu_draw_row(GContext *ctx, const Layer *cell, MenuIndex *idx, void
   if (a->name[0]) snprintf(title, sizeof(title), "%s", a->name);
   else snprintf(title, sizeof(title), "Account %d", idx->row + 1);
   if (a->code[0]) account_footer(a, sub, sizeof(sub));
-  else snprintf(sub, sizeof(sub), "%s", a->status[0] ? a->status : "No barcode yet");
+  else snprintf(sub, sizeof(sub), "%s", a->status[0] ? a->status : "No code yet");
   menu_cell_basic_draw(ctx, cell, title, sub, NULL);
 }
 

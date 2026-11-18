@@ -133,7 +133,7 @@ class LoginActivity : ComponentActivity() {
         } catch (e: ActivityNotFoundException) {
             val fallback = intent.getStringExtra("browser_fallback_url")
             if (fallback != null) web.loadUrl(fallback)
-            else Toast.makeText(this, AppSettings.strings().noAppForLink, Toast.LENGTH_SHORT).show()
+            else Toast.makeText(this, account.provider.text(AppSettings.strings().noAppForLink), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -409,7 +409,7 @@ class LoginActivity : ComponentActivity() {
             Spacer(Modifier.height(16.dp))
             val (title, text) = when (f.kind) {
                 Kind.OFFLINE -> s.offlineTitle to s.offlineText
-                Kind.NETWORK -> s.networkErrorTitle to s.networkErrorText
+                Kind.NETWORK -> account.provider.text(s.networkErrorTitle) to s.networkErrorText
                 Kind.OTHER -> s.pageErrorTitle to f.detail
             }
             Text(title, style = MaterialTheme.typography.headlineMedium, textAlign = TextAlign.Center)
