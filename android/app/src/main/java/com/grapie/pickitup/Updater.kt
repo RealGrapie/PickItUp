@@ -29,7 +29,7 @@ data class Release(val version: String, val apkUrl: String, val notes: String, v
  */
 object Updater {
     private const val TAG = "Updater"
-    private const val API_URL = "https://api.github.com/repos/RealGrapie/PickItUp/releases/latest"
+    private const val REPO_API = "https://api.github.com/repos/RealGrapie/PickItUp/releases"
 
     enum class State { IDLE, CHECKING, UP_TO_DATE, ERROR }
 
@@ -49,6 +49,8 @@ object Updater {
     val skipped = MutableStateFlow<String?>(null)
     /** Settings switch: check by itself on every app launch and show the card on the main screen. */
     val autoCheck = MutableStateFlow(true)
+    /** Settings switch: GitHub pre-releases count too ("1.6-beta.1"). Off = /releases/latest only. */
+    val beta = MutableStateFlow(false)
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences("update", Context.MODE_PRIVATE)
@@ -56,6 +58,7 @@ object Updater {
             .getOrNull() ?: "0"
         skipped.value = prefs.getString("skipped", null)
         autoCheck.value = prefs.getBoolean("autoCheck", true)
+        beta.value = prefs.getBoolean("beta", false)
         val v = prefs.getString("version", null)
         // Gone once that version (or a later one) is installed.
         available.value = if (v != null && isNewer(v, installed))
@@ -66,17 +69,45 @@ object Updater {
         if (available.value == null) File(context.cacheDir, "update").deleteRecursively()
     }
 
-    /** "v1.10" > "1.9": numeric parts, missing ones count as 0. */
-    fun isNewer(candidate: String, current: String): Boolean {
-        fun parts(v: String) = v.trim().removePrefix("v").split('.', '-').map { it.toIntOrNull() ?: 0 }
-        val a = parts(candidate)
-        val b = parts(current)
-        for (i in 0 until maxOf(a.size, b.size)) {
-            val d = a.getOrElse(i) { 0 } - b.getOrElse(i) { 0 }
-            if (d != 0) return d > 0
+    /**
+     * Semver-like: "v1.10" > "1.9" (numeric parts, missing ones count as 0), and a pre-release is
+     * older than its release: "1.6-beta.1" < "1.6-beta.2" < "1.6-rc.1" < "1.6".
+     */
+    fun isNewer(candidate: String, current: String): Boolean = compareVersions(candidate, current) > 0
+
+    fun compareVersions(a: String, b: String): Int {
+        fun split(v: String): Pair<List<Int>, List<String>> {
+            val t = v.trim().removePrefix("v").substringBefore('+')
+            val core = t.substringBefore('-').split('.').map { it.toIntOrNull() ?: 0 }
+            val pre = if ('-' in t) t.substringAfter('-').split('.', '-').filter { it.isNotEmpty() } else emptyList()
+            return core to pre
         }
-        return false
+        val (ca, pa) = split(a)
+        val (cb, pb) = split(b)
+        for (i in 0 until maxOf(ca.size, cb.size)) {
+            val d = ca.getOrElse(i) { 0 }.compareTo(cb.getOrElse(i) { 0 })
+            if (d != 0) return d
+        }
+        // Same core: no pre-release part wins.
+        if (pa.isEmpty() || pb.isEmpty()) return pb.size.coerceAtMost(1) - pa.size.coerceAtMost(1)
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val x = pa.getOrNull(i) ?: return -1  // fewer identifiers = older ("beta" < "beta.1")
+            val y = pb.getOrNull(i) ?: return 1
+            val nx = x.toIntOrNull()
+            val ny = y.toIntOrNull()
+            val d = when {
+                nx != null && ny != null -> nx.compareTo(ny)
+                nx != null -> -1  // numeric identifiers sort before words
+                ny != null -> 1
+                else -> x.compareTo(y, ignoreCase = true)
+            }
+            if (d != 0) return d
+        }
+        return 0
     }
+
+    /** Is [version] a pre-release ("1.6-beta.1")? For the "beta" mark on the update card. */
+    fun isPrerelease(version: String) = '-' in version.substringBefore('+')
 
     /** From the main screen when it opens anew (not on every return to it): one small GitHub request. */
     fun checkOnLaunch() {
@@ -86,6 +117,13 @@ object Updater {
     fun skip(version: String) {
         prefs.edit().putString("skipped", version).apply()
         skipped.value = version
+    }
+
+    /** Checks again at once: on = a pre-release may show up, off = a pending pre-release goes away. */
+    fun setBeta(on: Boolean) {
+        prefs.edit().putBoolean("beta", on).apply()
+        beta.value = on
+        check()
     }
 
     fun setAutoCheck(on: Boolean) {
@@ -123,28 +161,45 @@ object Updater {
         }
     }
 
-    /** null = the latest release has no APK attached. */
-    private fun fetchLatest(): Release? {
-        val c = URL(API_URL).openConnection() as HttpURLConnection
+    /**
+     * The newest release with an APK: /releases/latest (never a pre-release or draft), or with
+     * [beta] on the newest of the recent releases, pre-releases included. null = none has an APK.
+     */
+    private fun fetchLatest(): Release? =
+        if (beta.value) run {
+            val list = org.json.JSONArray(get("$REPO_API?per_page=20"))
+            (0 until list.length()).map { list.getJSONObject(it) }
+                .filter { !it.optBoolean("draft") }
+                .mapNotNull(::release)
+                .maxWithOrNull { x, y -> compareVersions(x.version, y.version) }
+        }
+        else release(JSONObject(get("$REPO_API/latest")))
+
+    private fun get(url: String): String {
+        val c = URL(url).openConnection() as HttpURLConnection
         c.connectTimeout = 15_000
         c.readTimeout = 15_000
         c.setRequestProperty("Accept", "application/vnd.github+json")
         try {
             if (c.responseCode != 200) error("HTTP ${c.responseCode}")
-            val json = JSONObject(c.inputStream.bufferedReader().use { it.readText() })
-            val assets = json.optJSONArray("assets") ?: return null
-            val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
-                .firstOrNull { it.optString("name").endsWith(".apk") } ?: return null
-            return Release(
-                json.getString("tag_name").removePrefix("v"),
-                apk.getString("browser_download_url"),
-                json.optString("body").replace("\r\n", "\n").trim(),
-                // "sha256:<hex>" since GitHub publishes asset digests; older assets have none.
-                apk.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:").orEmpty(),
-            )
+            return c.inputStream.bufferedReader().use { it.readText() }
         } finally {
             c.disconnect()
         }
+    }
+
+    /** null = no APK attached. */
+    private fun release(json: JSONObject): Release? {
+        val assets = json.optJSONArray("assets") ?: return null
+        val apk = (0 until assets.length()).map { assets.getJSONObject(it) }
+            .firstOrNull { it.optString("name").endsWith(".apk") } ?: return null
+        return Release(
+            json.getString("tag_name").removePrefix("v"),
+            apk.getString("browser_download_url"),
+            json.optString("body").replace("\r\n", "\n").trim(),
+            // "sha256:<hex>" since GitHub publishes asset digests; older assets have none.
+            apk.optString("digest").takeIf { it.startsWith("sha256:") }?.removePrefix("sha256:").orEmpty(),
+        )
     }
 
     /**

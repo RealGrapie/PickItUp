@@ -168,6 +168,12 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   `## Русский` (English first), each = one plain highlight line (the update card shows it) + short unwrapped `- `
   points (the "What's new" sheet). Lines are split by Cyrillic; headings and `**` are dropped.
   Tested on the emulator: 1.0 -> found v1.1 -> downloaded -> installer -> 1.1 installed.
+  Beta channel: settings switch "Бета-версии" (`Updater.beta`, default off) reads `/releases`
+  (pre-releases included, drafts skipped) and takes the highest version instead of
+  `/releases/latest`. Versions compare semver-like (`compareVersions`, `UpdaterVersionTest`):
+  `1.6-beta.1` < `1.6-beta.2` < `1.6-rc.1` < `1.6`. A beta = a GitHub release marked
+  "pre-release", tag `v1.6-beta.1`, `versionName` the same, and a `versionCode` above the
+  current stable one (the installer refuses a lower one), so the stable 1.6 needs a higher code again.
 
 ## Hard-won rules
 
