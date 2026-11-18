@@ -86,7 +86,8 @@ class Account internal constructor(
     /** Per-account values of the provider's client (e.g. when the login pair was last renewed). */
     fun clientPrefs(): SharedPreferences = prefs
 
-    override fun toString() = id
+    /** In logs: "ozon/Default", "ozon/account2" - stable, and no digit run for the masker to eat (ids have one). */
+    override fun toString() = "${provider.id}/$profile"
 }
 
 /**

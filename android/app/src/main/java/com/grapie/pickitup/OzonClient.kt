@@ -92,7 +92,7 @@ object OzonClient : ProviderClient {
         installServiceWorkerGuard(account)
         val web = WebView(context.applicationContext).also { WebProfiles.apply(it, account.profile) }
         val before = tokenPrint(account)
-        lastPrint[account.id]?.let { if (it != before) BarcodeStore.log(AppSettings.strings().logTokensChanged(it, before)) }
+        lastPrint[account.id]?.let { if (it != before) BarcodeStore.log(AppSettings.strings().logTokensChanged(short(it), short(before)), account) }
         DebugLog.d("fetch", "start, account $account; alive=${alive.value} loginOpen=${LoginActivity.isOpen} vpn=${Net.vpnActive(context)}")
         DebugLog.tokens("fetch", "tokens before", account)
         val cookiesBefore = DebugLog.cookies(account)
@@ -105,7 +105,8 @@ object OzonClient : ProviderClient {
             // writes cookies lazily, and the process may die right after the answer.
             WebProfiles.cookies(account.profile).flush()
             val answered = tokenPrint(account)
-            BarcodeStore.log(AppSettings.strings().logTokens(before, answered))
+            // The journal only notes a renewal; the detailed log has the full prints anyway.
+            if (answered != before) BarcodeStore.log(AppSettings.strings().logTokens(short(before), short(answered)), account)
             val afterAnswer = DebugLog.cookieDiff("fetch", "cookies at the answer", cookiesBefore, account)
             retire(web, account, before, answered, hidden = true, cookiesNow = afterAnswer)
         }
@@ -171,7 +172,7 @@ object OzonClient : ProviderClient {
             DebugLog.cookieDiff(tag, "cookies since retiring", cookiesAt, account)
             val late = tokenPrint(account)
             if (late != printNow) {
-                BarcodeStore.log(AppSettings.strings().logTokens(printNow, late))
+                BarcodeStore.log(AppSettings.strings().logTokens(short(printNow), short(late)), account)
                 markFresh(account)
             }
             lastPrint[account.id] = late
@@ -274,6 +275,9 @@ object OzonClient : ProviderClient {
 
     /** Journal-safe print of the current pair (see [tokenPrint]). */
     fun currentPrint(account: Account) = tokenPrint(account)
+
+    /** "access:759f refresh:496c" -> "759f/496c" for the journal. */
+    private fun short(print: String) = print.split(' ').joinToString("/") { it.substringAfter(':') }
 
     /**
      * Ozon's tokens are "12.<account id>.<session>...": a guest (logged-out) pair has account 0.

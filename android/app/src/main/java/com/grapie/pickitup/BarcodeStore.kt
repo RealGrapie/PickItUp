@@ -107,9 +107,14 @@ object BarcodeStore {
 
     // With the date: the journal is kept across restarts (background runs start the app anew).
     private val fmt = SimpleDateFormat("dd.MM HH:mm:ss", Locale.US)
-    fun log(msg: String) {
-        DebugLog.d("journal", msg)
-        log.value = (log.value + "${fmt.format(Date())}  $msg").takeLast(100)
+    /**
+     * One journal line. With [account] and several accounts the line says whose it is: the name in
+     * the journal (it stays on the phone), the neutral "ozon/account2" in the shared detailed log.
+     */
+    fun log(msg: String, account: Account? = null) {
+        val tagged = account != null && Accounts.list.value.size > 1
+        DebugLog.d("journal", if (tagged) "[$account] $msg" else msg)
+        log.value = (log.value + Journal.line(System.currentTimeMillis(), if (tagged) account!!.label() else null, msg)).takeLast(100)
         prefs.edit().putString("journal", log.value.joinToString("\n")).apply()
     }
 

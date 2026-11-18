@@ -58,6 +58,12 @@ object BarcodeSync {
     suspend fun refreshAll(context: Context): List<FetchResult> =
         Accounts.list.value.filter { it.loggedIn.value || BarcodeStore.demo.value }.map { refresh(context, it) }
 
+    /** Debug screen: every account, then one send. */
+    fun refreshAllAndSend(context: Context) = scope.launch {
+        refreshAll(context)
+        sendToWatch(context)
+    }
+
     /** Delivered only if the watchapp is open; otherwise it gets everything on its next request. */
     fun sendToWatchAsync(context: Context) = scope.launch {
         sendToWatch(context)
@@ -149,17 +155,17 @@ object BarcodeSync {
         }
         if (LoginActivity.isOpen) {
             // Two pages rotating one login pair at once: the cookie jar may keep the older new pair.
-            BarcodeStore.log(AppSettings.strings().logLoginOpen)
+            BarcodeStore.log(AppSettings.strings().logLoginOpen, account)
             return@withLock FetchResult.Error(AppSettings.strings().logLoginOpen)
         }
         if (Net.vpnActive(context)) {
             // Ozon sees the VPN's address: a login from abroad may get ended. Split tunneling is fine.
-            BarcodeStore.log(AppSettings.strings().logVpn)
+            BarcodeStore.log(AppSettings.strings().logVpn, account)
             return@withLock FetchResult.Vpn
         }
         account.busy.value = true
         val s = AppSettings.strings()
-        BarcodeStore.log(s.logFetching)
+        BarcodeStore.log(s.logFetching, account)
         val r = try {
             account.provider.client.fetch(context, account)
         } finally {
@@ -174,13 +180,13 @@ object BarcodeSync {
                 account.save(r.barcode)
                 account.loginNeeded.value = false
                 // Only the tail: the journal is on the debug screen, which ends up in screenshots.
-                BarcodeStore.log(s.logFetched("…" + r.barcode.code.takeLast(4)))
+                BarcodeStore.log(s.logFetched("…" + r.barcode.code.takeLast(4)), account)
             }
             FetchResult.LoginNeeded -> {
                 account.loginNeeded.value = true
-                BarcodeStore.log(s.logLoginNeeded)
+                BarcodeStore.log(s.logLoginNeeded, account)
             }
-            is FetchResult.Error -> BarcodeStore.log(s.logError(r.message))
+            is FetchResult.Error -> BarcodeStore.log(s.logError(r.message), account)
             FetchResult.Vpn -> Unit  // never comes from OzonClient
         }
         r

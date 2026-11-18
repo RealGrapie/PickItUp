@@ -260,7 +260,7 @@ class SettingsActivity : BaseActivity() {
                         a.provider.client.logout(a)
                         a.clear()
                         a.loginNeeded.value = true
-                        BarcodeStore.log(s.logLoggedOut + " (" + a.label() + ")")
+                        BarcodeStore.log(s.logLoggedOut, a)
                         // If the watchapp is open it forgets the code now, else on its next request.
                         BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.logoutConfirm, color = MaterialTheme.colorScheme.error) }
@@ -279,7 +279,7 @@ class SettingsActivity : BaseActivity() {
                     TextButton(onClick = {
                         confirmRemove = null
                         Accounts.remove(a)
-                        BarcodeStore.log(s.removeAccount + ": " + a.label())
+                        BarcodeStore.log(s.logRemoved, a)
                         BarcodeSync.sendToWatchAsync(this@SettingsActivity)
                     }) { Text(s.removeAccountConfirm, color = MaterialTheme.colorScheme.error) }
                 },
