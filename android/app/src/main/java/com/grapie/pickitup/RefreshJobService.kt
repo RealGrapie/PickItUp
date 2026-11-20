@@ -171,6 +171,15 @@ class RefreshJobService : JobService() {
             }
         }
 
+        /** After a reboot: the phone was off at the daily time, that alarm is lost. Run now if a code is stale. */
+        fun catchUp(context: Context) {
+            if (SessionProbe.active || !BarcodeStore.backgroundRefresh.value || BarcodeStore.refreshMode.value != RefreshMode.DAILY) return
+            val stale = Accounts.list.value.count { (it.loggedIn.value || BarcodeStore.demo.value) && BarcodeSync.isStale(it.shown.value) }
+            if (stale == 0) return
+            DebugLog.d("job", "daily run missed while the phone was off ($stale stale): running now")
+            startDailyRun(context)
+        }
+
         /** Logs whether the run is still waiting and why. */
         fun logCheck(context: Context, label: String) {
             val reason = DebugLog.pendingReason(context, JOB_ID)
@@ -226,6 +235,8 @@ class RefreshAlarmReceiver : BroadcastReceiver() {
                 runCatching { RefreshJobService.logCheck(context, "alarm+8s") }
                 done.finish()
             }, 8_000)
+        } else if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+            RefreshJobService.catchUp(context)
         }
         // The next alarm (Application.onCreate did it too; this one sees the daily time as passed).
         RefreshJobService.schedule(context)
