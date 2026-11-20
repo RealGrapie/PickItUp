@@ -331,7 +331,7 @@ class Strings(
                     WatchStatus.NO_PEBBLE_APP -> "не найдено приложение Pebble на телефоне"
                     WatchStatus.NOT_CONNECTED -> "часы не подключены"
                     WatchStatus.OTHER_APP_OPEN -> "на часах открыто другое приложение"
-                    WatchStatus.NO_PERMISSION -> "нет доступа (companionApp в package.json)"
+                    WatchStatus.NO_PERMISSION -> "разрешите обмен сообщениями в приложении Pebble"
                     WatchStatus.ERROR -> "не удалось отправить"
                 }
             },
@@ -540,7 +540,7 @@ class Strings(
                     WatchStatus.NO_PEBBLE_APP -> "Pebble app not found on the phone"
                     WatchStatus.NOT_CONNECTED -> "watch not connected"
                     WatchStatus.OTHER_APP_OPEN -> "another app is open on the watch"
-                    WatchStatus.NO_PERMISSION -> "no access (companionApp in package.json)"
+                    WatchStatus.NO_PERMISSION -> "allow messages in the Pebble app"
                     WatchStatus.ERROR -> "couldn't send"
                 }
             },

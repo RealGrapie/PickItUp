@@ -323,8 +323,9 @@ static void draw_setup(GContext *ctx, GRect b) {
     }
   }
 
-  // No answer from the phone (companion missing) or opened on purpose: link to the app.
-  const char *foot = s_show_setup ? "BACK: close" : "Scan with your phone";
+  // No answer from the phone or opened on purpose: link to the app. The Pebble app refuses the
+  // request the same way when PickItUp! is missing and when its permission is denied / undecided.
+  const char *foot = s_show_setup ? "BACK: close" : "Or allow in Pebble app";
 #ifdef PBL_ROUND
   draw_text(ctx, "Get the phone app", title_font, band(b, 7, 20));
   draw_qr(ctx, &s_setup_qr, centered_square(b, 64, 50), 2);
