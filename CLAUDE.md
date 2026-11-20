@@ -128,13 +128,13 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
 - **Watch buttons**: SELECT cycles barcode -> QR (test; Ozon scans Code 128) -> rotated barcode
   (order via a `next[]` table; the persisted enum values are unchanged),
   long SELECT (0.6 s) opens the companion QR any time and only BACK closes it (SELECT does nothing
-  there; BACK elsewhere exits the app), UP forces a refresh, DOWN shows the next account (several accounts; else it only resets the
+  there; BACK elsewhere exits the app), UP / DOWN show the previous / next account with a slide (the code leaves up or down, the other comes in; several accounts; else they only reset the
   auto-exit timer). View mode persists. The backlight is left to the system (user's choice).
 - **Several accounts on the watch**: the phone sends one message per account (`Index`, `Count`,
   `Name` = header line, ASCII via `WatchNames`: "OZON: Mama"), the first account last so a
   pre-multi-account watchapp keeps it. The watch keeps up to 4 (account 0 = the old persist keys,
   others 100 + i*4 + field); with 2+ it opens on an accounts menu (MenuLayer), BACK from a code
-  returns there, UP refreshes the account shown (`Index` in the request). A status without
+  returns there, no button refreshes any more (the phone re-fetches stale codes on open; `Index` still goes with every request). A status without
   `Index` (e.g. "Off in phone app") is for all accounts.
 - **Auto-exit**: the watchapp closes after N s without button presses (`Timeout`, 0 = never,
   default 120 = 2 min on both sides, persisted on the watch); N is chosen in companion settings and sent with every reply.

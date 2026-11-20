@@ -8,8 +8,8 @@
 // phone link. Day codes come with the next days too, and the watch moves on at midnight by itself.
 //
 // Buttons: SELECT - cycle barcode / QR code (test) / rotated barcode (more quiet zone),
-// long SELECT - setup screen with a QR link to the phone app (BACK closes it), UP - ask the phone to re-fetch
-// from Ozon. The backlight is left to the system. The app closes itself after a timeout
+// long SELECT - setup screen with a QR link to the phone app (BACK closes it), UP / DOWN - previous /
+// next account (several accounts; the phone re-fetches stale codes by itself). The backlight is left to the system. The app closes itself after a timeout
 // without button presses (set in the phone companion), except on setup screens.
 //
 // Without a stored code the app explains why: phone not connected, no answer from the phone
@@ -437,6 +437,7 @@ static GRect rotate_rect(GRect r, GRect screen) {
 }
 
 static bool fb_get(GBitmap *fb, int x, int y, uint8_t bg8) {
+  if (y < 0 || y >= gbitmap_get_bounds(fb).size.h) return false;
   GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, y);
   if (x < row.min_x || x > row.max_x) return false;
   if (gbitmap_get_format(fb) == GBitmapFormat1Bit) return !((row.data[x / 8] >> (x % 8)) & 1);  // black text
@@ -458,7 +459,9 @@ static void fb_set(GBitmap *fb, int x, int y, GColor c) {
 
 // Renders [text] upright into a scratch strip in the middle of the screen (full-width rows even
 // on round screens) and keeps its pixels. The strip is as wide as the screen allows.
-static void render_strip(GContext *ctx, GRect screen, TextStrip *s, const char *text, const char *font,
+// [off] = where the layer is on the screen (it slides while the account changes): the frame
+// buffer is the whole screen, the drawing is in layer coordinates.
+static void render_strip(GContext *ctx, GRect screen, GPoint off, TextStrip *s, const char *text, const char *font,
                          GRect dst, GColor bg, GColor fg) {
   s->w = dst.size.w < screen.size.w ? dst.size.w : screen.size.w;
   s->h = dst.size.h;
@@ -467,7 +470,9 @@ static void render_strip(GContext *ctx, GRect screen, TextStrip *s, const char *
   s->dst = GRect(dst.origin.x + (dst.size.w - s->w) / 2, dst.origin.y, s->w, s->h);
   s->bits = calloc((s->w * s->h + 7) / 8, 1);
   if (!s->bits) return;
-  GRect scratch = GRect((screen.size.w - s->w) / 2, (screen.size.h - s->h) / 2, s->w, s->h);
+  // In the middle of the part of the layer that is on the screen.
+  int top = off.y < 0 ? -off.y : 0, bottom = off.y > 0 ? screen.size.h - off.y : screen.size.h;
+  GRect scratch = GRect((screen.size.w - s->w) / 2, (top + bottom - s->h) / 2, s->w, s->h);
   graphics_context_set_fill_color(ctx, bg);
   graphics_fill_rect(ctx, scratch, 0, GCornerNone);
   graphics_context_set_text_color(ctx, fg);
@@ -477,7 +482,7 @@ static void render_strip(GContext *ctx, GRect screen, TextStrip *s, const char *
   uint8_t bg8 = bg.argb;
   for (int y = 0; y < s->h; y++) {
     for (int x = 0; x < s->w; x++) {
-      if (fb_get(fb, scratch.origin.x + x, scratch.origin.y + y, bg8)) {
+      if (fb_get(fb, off.x + scratch.origin.x + x, off.y + scratch.origin.y + y, bg8)) {
         int i = y * s->w + x;
         s->bits[i / 8] |= 1 << (i % 8);
       }
@@ -486,14 +491,14 @@ static void render_strip(GContext *ctx, GRect screen, TextStrip *s, const char *
   graphics_release_frame_buffer(ctx, fb);
 }
 
-static void blit_strip(GBitmap *fb, GRect screen, TextStrip *s) {
+static void blit_strip(GBitmap *fb, GRect screen, GPoint off, TextStrip *s) {
   if (!s->bits) return;
   for (int y = 0; y < s->h; y++) {
     for (int x = 0; x < s->w; x++) {
       int i = y * s->w + x;
       if (s->bits[i / 8] & (1 << (i % 8))) {
         int lx = s->dst.origin.x + x, ly = s->dst.origin.y + y;
-        fb_set(fb, screen.size.w - 1 - ly, lx, s->fg);
+        fb_set(fb, off.x + screen.size.w - 1 - ly, off.y + lx, s->fg);
       }
     }
   }
@@ -501,7 +506,7 @@ static void blit_strip(GBitmap *fb, GRect screen, TextStrip *s) {
   s->bits = NULL;
 }
 
-static void draw_rotated(GContext *ctx, GRect b) {
+static void draw_rotated(GContext *ctx, GRect b, GPoint off) {
   GRect land = GRect(0, 0, b.size.h, b.size.w);
   Layout l = layout_for(land);
   bool big = land.size.w >= 200 || land.size.h >= 200;
@@ -509,9 +514,9 @@ static void draw_rotated(GContext *ctx, GRect b) {
   footer_text(foot, sizeof(foot));
 
   TextStrip strips[3];
-  render_strip(ctx, b, &strips[0], header_text(), title_font(big), l.title, header_bg(), header_fg());
-  render_strip(ctx, b, &strips[1], s_visible[0] ? s_visible : s_code, code_font(big), l.code, GColorWhite, GColorBlack);
-  render_strip(ctx, b, &strips[2], foot, foot_font(big), l.footer, GColorWhite, GColorBlack);
+  render_strip(ctx, b, off, &strips[0], header_text(), title_font(big), l.title, header_bg(), header_fg());
+  render_strip(ctx, b, off, &strips[1], s_visible[0] ? s_visible : s_code, code_font(big), l.code, GColorWhite, GColorBlack);
+  render_strip(ctx, b, off, &strips[2], foot, foot_font(big), l.footer, GColorWhite, GColorBlack);
 
   graphics_context_set_fill_color(ctx, GColorWhite);
   graphics_fill_rect(ctx, b, 0, GCornerNone);
@@ -522,7 +527,7 @@ static void draw_rotated(GContext *ctx, GRect b) {
 
   GBitmap *fb = graphics_capture_frame_buffer(ctx);
   for (int i = 0; i < 3; i++) {
-    if (fb) blit_strip(fb, b, &strips[i]);
+    if (fb) blit_strip(fb, b, off, &strips[i]);
     else if (strips[i].bits) { free(strips[i].bits); strips[i].bits = NULL; }
   }
   if (fb) graphics_release_frame_buffer(ctx, fb);
@@ -542,7 +547,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   // Wildberries scans a QR: the barcode views would only show a code nobody reads.
   ViewMode mode = s_format == FORMAT_QR ? MODE_QR : s_mode;
   if (mode == MODE_VERTICAL) {
-    draw_rotated(ctx, b);
+    draw_rotated(ctx, b, layer_get_frame(layer).origin);
     return;
   }
 
@@ -610,7 +615,7 @@ static void send_request(void *data) {
     return;
   }
   dict_write_int32(it, MESSAGE_KEY_Request, s_request_kind);
-  dict_write_int32(it, MESSAGE_KEY_Index, s_cur);  // which code UP refreshes
+  dict_write_int32(it, MESSAGE_KEY_Index, s_cur);  // the code shown (for a REFRESH request)
   app_message_outbox_send();
 }
 
@@ -768,28 +773,72 @@ static void select_long_click(ClickRecognizerRef recognizer, void *context) {
   redraw();
 }
 
-static void up_click(ClickRecognizerRef recognizer, void *context) {
-  restart_exit_timer();
-  // One refresh at a time: each one makes Ozon rotate the login tokens.
-  if (strcmp(s_status, STATUS_UPDATING) == 0) return;
-  if (!connection_service_peek_pebble_app_connection()) {
-    snprintf(s_status, sizeof(s_status), STATUS_OFFLINE);
-  } else {
-    snprintf(s_status, sizeof(s_status), STATUS_UPDATING);
-    request_from_phone(REQUEST_REFRESH);
-  }
-  redraw();
+// ---- UP / DOWN: the previous / next account's code, scrolled like a list: the code leaves
+// upwards (DOWN) or downwards (UP) and the other one comes in from the opposite edge.
+
+#define SLIDE_MS 260
+static Animation *s_slide;
+static int s_slide_to = -1;  // account shown once the old code has left
+static int s_slide_dir;      // +1 = next (content goes up), -1 = previous
+
+static void slide_offset(int y) {
+  if (!s_canvas) return;
+  GRect f = layer_get_frame(s_canvas);
+  f.origin.y = y;
+  layer_set_frame(s_canvas, f);
 }
 
-// DOWN: the next account's code (several accounts); otherwise it only keeps the app open.
-static void down_click(ClickRecognizerRef recognizer, void *context) {
-  if (s_count > 1 && !s_show_setup) {
-    select_account((s_cur + 1) % s_count);
-    if (s_menu) menu_layer_set_selected_index(s_menu, MenuIndex(0, s_cur), MenuRowAlignCenter, false);
-  }
-  restart_exit_timer();
+static void show_account(int i) {
+  select_account(i);
+  if (s_menu) menu_layer_set_selected_index(s_menu, MenuIndex(0, s_cur), MenuRowAlignCenter, false);
   redraw();  // also recolours the menu's highlight for the new row
 }
+
+static void slide_update(Animation *anim, const AnimationProgress progress) {
+  if (!s_canvas) return;
+  int h = layer_get_bounds(s_canvas).size.h;
+  int half = ANIMATION_NORMALIZED_MAX / 2;
+  if (progress < half) {
+    slide_offset(-s_slide_dir * h * progress / half);
+  } else {
+    if (s_slide_to >= 0) { show_account(s_slide_to); s_slide_to = -1; }
+    slide_offset(s_slide_dir * h * (ANIMATION_NORMALIZED_MAX - progress) / half);
+  }
+}
+
+static void slide_stopped(Animation *anim, bool finished, void *context) {
+  if (anim != s_slide) return;  // replaced by a newer press
+  if (s_slide_to >= 0) { show_account(s_slide_to); s_slide_to = -1; }
+  slide_offset(0);
+  s_slide = NULL;  // freed by the system (SDK 3+)
+}
+
+static const AnimationImplementation s_slide_impl = { .update = slide_update };
+
+static void step_account(int dir) {
+  restart_exit_timer();
+  if (s_count < 2 || s_show_setup) return;  // one account: the press only keeps the app open
+  // A press during a slide: from where that one was going.
+  if (s_slide) {
+    Animation *old = s_slide;
+    s_slide = NULL;
+    if (s_slide_to >= 0) { show_account(s_slide_to); s_slide_to = -1; }
+    animation_unschedule(old);
+  }
+  int to = (s_cur + dir + s_count) % s_count;
+  s_slide_to = to;
+  s_slide_dir = dir;
+  s_slide = animation_create();
+  if (!s_slide) { show_account(to); s_slide_to = -1; return; }
+  animation_set_duration(s_slide, SLIDE_MS);
+  animation_set_curve(s_slide, AnimationCurveEaseInOut);
+  animation_set_implementation(s_slide, &s_slide_impl);
+  animation_set_handlers(s_slide, (AnimationHandlers){ .stopped = slide_stopped }, NULL);
+  animation_schedule(s_slide);
+}
+
+static void up_click(ClickRecognizerRef recognizer, void *context) { step_account(-1); }
+static void down_click(ClickRecognizerRef recognizer, void *context) { step_account(1); }
 
 // BACK closes the companion QR opened with long SELECT; otherwise back to the accounts menu, or
 // out of the app.
