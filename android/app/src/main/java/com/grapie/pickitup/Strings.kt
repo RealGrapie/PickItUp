@@ -200,6 +200,19 @@ class Strings(
     val customColorTitle: String,
     val hue: String,
     val saturation: String,
+    // Main screen: accounts and the watch
+    val refreshAll: String,
+    val onWatch: String,
+    val notOnWatch: String,
+    val watchTitle: String,
+    val watchCodes: String,
+    val lastDelivered: (String) -> String,
+    val openWatchapp: String,
+    val reorder: String,
+    val ptrPull: String,
+    val ptrRelease: String,
+    val ptrRefreshing: String,
+    val ptrDone: String,
 ) {
     /** "today, 00:57" / "yesterday, 23:10" / "12 Oct, 14:03" (with the year if not this year). */
     fun receivedWhen(at: Long, now: Long = System.currentTimeMillis()): String {
@@ -422,6 +435,18 @@ class Strings(
             customColorTitle = "Свой цвет",
             hue = "Оттенок",
             saturation = "Насыщенность",
+            refreshAll = "Обновить все",
+            onWatch = "на часах",
+            notOnWatch = "ждёт watchapp",
+            watchTitle = "Часы",
+            watchCodes = "Коды",
+            lastDelivered = { "Последняя доставка: $it" },
+            openWatchapp = "Открыть watchapp",
+            reorder = "Перетащите, чтобы изменить порядок",
+            ptrPull = "Потяните, чтобы обновить",
+            ptrRelease = "Отпустите, чтобы обновить",
+            ptrRefreshing = "Обновляется…",
+            ptrDone = "Обновлено",
         )
 
         val EN = Strings(
@@ -631,6 +656,18 @@ class Strings(
             customColorTitle = "Custom colour",
             hue = "Hue",
             saturation = "Saturation",
+            refreshAll = "Refresh all",
+            onWatch = "on the watch",
+            notOnWatch = "waiting for the watchapp",
+            watchTitle = "Watch",
+            watchCodes = "Codes",
+            lastDelivered = { "Last delivered: $it" },
+            openWatchapp = "Open the watchapp",
+            reorder = "Drag to reorder",
+            ptrPull = "Pull down to refresh",
+            ptrRelease = "Release to refresh",
+            ptrRefreshing = "Refreshing…",
+            ptrDone = "Refresh completed",
         )
     }
 }

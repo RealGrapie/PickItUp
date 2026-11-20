@@ -77,6 +77,19 @@ class Account internal constructor(
     /** The last request said the login is gone (the main screen offers to log in again). */
     val loginNeeded = MutableStateFlow(false)
     val busy = MutableStateFlow(false)
+    /**
+     * `fetchedAt` of the code the watch last took for this account (0 = none). It is "on the watch"
+     * while that is still [shown]: a Wildberries week shares one fetch time, so the watch's own
+     * midnight switch keeps it on. Persisted, so a restarted app still knows.
+     */
+    val onWatchAt = MutableStateFlow(prefs.getLong("onWatchAt", 0L))
+
+    fun markOnWatch(b: Barcode?) {
+        val at = b?.fetchedAt ?: 0L
+        if (at == onWatchAt.value) return
+        prefs.edit().putLong("onWatchAt", at).apply()
+        onWatchAt.value = at
+    }
     /** One code per day, oldest first (Wildberries); empty for Ozon. */
     var days: List<Barcode> = emptyList()
         private set
@@ -223,6 +236,18 @@ object Accounts {
         val clean = name.trim().take(24)
         prefs.edit().putString("${account.id}.name", clean).apply()
         account.name.value = clean
+    }
+
+    /** Moves [account] one place up (-1) or down (+1): the main screen and the watch follow this order. */
+    /** New order (same accounts): chips, settings and the watch's list follow it. */
+    fun reorder(order: List<Account>) {
+        val old = list.value
+        if (order == old || order.size != old.size || order.toSet() != old.toSet()) return
+        list.value = order
+        saveIds()
+        // The watch keeps codes by position: what it has in a moved account's place is another one's now.
+        order.forEachIndexed { i, a -> if (old[i] != a) a.markOnWatch(null) }
+        DebugLog.d("accounts", "new order: ${order.joinToString { it.id }}")
     }
 
     private fun saveIds() {

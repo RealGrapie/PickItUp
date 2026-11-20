@@ -26,12 +26,13 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -40,12 +41,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -55,6 +60,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -222,41 +228,96 @@ class MainActivity : BaseActivity() {
         }
     }
 
+    /** "Add account" on the main screen: which marketplace (a dialog), then its login, as in settings. */
+    private val choosing = mutableStateOf(false)
+
+    private fun addAccount() {
+        // Reads the WebView feature list: only here, on a tap, not while drawing the screen.
+        if (!Accounts.canAdd()) {
+            Toast.makeText(this, AppSettings.strings().addAccountUnsupported, Toast.LENGTH_LONG).show()
+            return
+        }
+        choosing.value = true
+    }
+
+    private fun addAccount(provider: Provider) {
+        choosing.value = false
+        val account = Accounts.add(provider)
+        if (account.loggedIn.value) BarcodeSync.refreshAndSend(this, account) else login(account)
+    }
+
+    /** A watch status the user has to do something about (not just "the watchapp is closed"). */
+    private fun WatchStatus.isProblem() =
+        this == WatchStatus.NO_PEBBLE_APP || this == WatchStatus.NOT_CONNECTED || this == WatchStatus.NO_PERMISSION || this == WatchStatus.ERROR
+
+    /** Marketplace mark on chips and rows: colour only, no logos (the app is unofficial). */
+    private fun providerColor(p: Provider) = when (p) {
+        Provider.OZON -> Color(0xFF005BFF)
+        Provider.WB -> Color(0xFFA73AFD)
+    }
+
+    @Composable
+    private fun watchDotColor(status: WatchStatus, connected: Boolean) = when (status) {
+        WatchStatus.RECEIVED -> MaterialTheme.colorScheme.primary
+        WatchStatus.UNKNOWN, WatchStatus.OTHER_APP_OPEN ->
+            if (connected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline
+        else -> MaterialTheme.colorScheme.error
+    }
+
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun BarcodeScreen(onSettings: () -> Unit, accounts: List<Account>) {
         val s = LocalStrings.current
-        // Several accounts: swipe between their codes; everything below follows the page shown.
+        // Chips pick the account; a swipe anywhere below them does too: one page per account.
         val pager = rememberPagerState { accounts.size }
+        val scope = rememberCoroutineScope()
         val account = accounts.getOrElse(pager.currentPage) { accounts.first() }
         val barcode by account.shown.collectAsStateWithLifecycle()
         val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
-        val busy by account.busy.collectAsStateWithLifecycle()
-        val sessionLost by account.loginNeeded.collectAsStateWithLifecycle()
-        val loggedIn by account.loggedIn.collectAsStateWithLifecycle()
-        // loginNeeded lives only in memory: after a restart the persisted loggedIn = false must
-        // still show the "session ended" card over an old code (a background run found it out).
-        val loginNeeded = (sessionLost || !loggedIn) && !demo
-        val canRefresh = demo || loggedIn
-        val watchStatus by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
+        // Refresh covers every account: the watch gets all of them anyway.
+        val busy by remember(accounts) { combine(accounts.map { it.busy }) { b -> b.any { it } } }.collectAsStateWithLifecycle(false)
+        val anyLoggedIn by remember(accounts) { combine(accounts.map { it.loggedIn }) { l -> l.any { it } } }.collectAsStateWithLifecycle(false)
+        val canRefresh = demo || anyLoggedIn
         val vpn by Net.vpn.collectAsStateWithLifecycle()
-        val connected by Watches.connected.collectAsStateWithLifecycle()
-        val lastWatch by Watches.last.collectAsStateWithLifecycle()
         val watchEnabled by BarcodeStore.watchEnabled.collectAsStateWithLifecycle()
         var fullscreen by remember { mutableStateOf(false) }
+        var watchSheet by remember { mutableStateOf(false) }
         // Ticks so "today" turns into "yesterday" at midnight without leaving the screen.
         val now by produceState(System.currentTimeMillis()) {
             while (true) { delay(30_000); value = System.currentTimeMillis() }
         }
-        val scroll = rememberScrollState()
-        val expanded by remember { derivedStateOf { scroll.value < 40 } }
+        // An account was just added: show its page.
+        var count by remember { mutableIntStateOf(accounts.size) }
+        LaunchedEffect(accounts.size) {
+            if (accounts.size > count) pager.animateScrollToPage(accounts.lastIndex)
+            count = accounts.size
+        }
+        // Each page scrolls on its own; the FAB shrinks while the page shown is scrolled down.
+        val scrolls = remember(accounts.size) { List(accounts.size) { ScrollState(0) } }
+        val expanded by remember(scrolls) { derivedStateOf { (scrolls.getOrNull(pager.currentPage)?.value ?: 0) < 40 } }
+        val refreshAll = { if (!busy) BarcodeSync.refreshAllAndSend(this@MainActivity) }
+        val pullAt = with(LocalDensity.current) { 72.dp.toPx() }
+        val refresher = remember(pullAt) { PullRefresh(scope, pullAt) { BarcodeSync.refreshAllAndSend(this@MainActivity) } }
+        refresher.enabled = canRefresh && !busy
+        val busyNow by rememberUpdatedState(busy)
+        // Let go past the line: the gap stays until every account is fetched, then says done (or just closes).
+        LaunchedEffect(refresher.phase) {
+            if (refresher.phase != PullRefresh.Phase.REFRESHING) return@LaunchedEffect
+            withTimeoutOrNull(1500) { snapshotFlow { busyNow }.first { it } }
+            snapshotFlow { busyNow }.first { !it }
+            val ok = accounts.all { !(it.loggedIn.value || demo) || !BarcodeSync.isStale(it.shown.value) }
+            refresher.finished(ok)
+        }
 
         // Fixed bar: the content fits the screen, so nothing collapses or scrolls for no reason.
         Scaffold(
             topBar = {
                 TopAppBar(
                     title = { Text(APP_NAME, style = MaterialTheme.typography.headlineMedium) },
-                    actions = { SettingsButton(onSettings) },
+                    actions = {
+                        if (watchEnabled) WatchButton { watchSheet = true }
+                        SettingsButton(onSettings)
+                    },
                 )
             },
             floatingActionButton = {
@@ -265,10 +326,15 @@ class MainActivity : BaseActivity() {
                     val angle by spin.animateFloat(0f, 360f, infiniteRepeatable(tween(900, easing = LinearEasing)), label = "angle")
                     val source = remember { MutableInteractionSource() }
                     ExtendedFloatingActionButton(
-                        onClick = { if (!busy) BarcodeSync.refreshAndSend(this@MainActivity, account) },
+                        onClick = refreshAll,
                         expanded = expanded,
                         icon = { Ic(R.drawable.ic_refresh, Modifier.graphicsLayer { rotationZ = if (busy) angle else 0f }) },
-                        text = { Text(if (busy) s.refreshing else s.refresh, style = MaterialTheme.typography.titleMedium) },
+                        text = {
+                            Text(
+                                if (busy) s.refreshing else if (accounts.size > 1) s.refreshAll else s.refresh,
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                        },
                         shape = morphShape(source, rest = 20.dp, pressed = 12.dp),
                         interactionSource = source,
                         modifier = Modifier.pressScale(source),
@@ -276,120 +342,109 @@ class MainActivity : BaseActivity() {
                 }
             },
         ) { padding ->
-            val content: @Composable () -> Unit = {
-                Column(
-                    Modifier.fillMaxSize().verticalScroll(scroll).padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    Spacer(Modifier.height(4.dp))
-                    HorizontalPager(pager, pageSpacing = 16.dp, verticalAlignment = Alignment.Top) { page ->
-                        val a = accounts.getOrNull(page) ?: return@HorizontalPager
-                        val b by a.shown.collectAsStateWithLifecycle()
-                        val pageBusy by a.busy.collectAsStateWithLifecycle()
-                        val name by a.name.collectAsStateWithLifecycle()
-                        val title = a.provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
-                        BarcodeCard(b, pageBusy, title, a.provider, onEnlarge = { fullscreen = true })
-                    }
-                    if (accounts.size > 1) PagerDots(accounts.size, pager.currentPage)
-
-                    AnimatedVisibility(loginNeeded) { SessionCard(account, fresh = barcode == null) }
-                    AnimatedVisibility(vpn && !BarcodeStore.demo.value) { VpnCard() }
-                    UpdateCard(skippable = true)
-
-                    Surface(color = MaterialTheme.colorScheme.surfaceContainerLow, shape = MaterialTheme.shapes.large) {
-                        Column(Modifier.padding(vertical = 4.dp)) {
-                            val b = barcode
-                            val stale = BarcodeSync.isStale(b)
-                            StatusItem(
-                                icon = R.drawable.ic_schedule,
-                                title = s.receivedTitle,
-                                text = b?.let { s.receivedWhen(it.fetchedAt, now) } ?: "—",
-                            ) {
-                                when {
-                                    busy -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.5.dp)
-                                    b != null && stale -> Badge(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer) {
-                                        Text(s.stale, Modifier.padding(horizontal = 4.dp), style = MaterialTheme.typography.labelMedium)
-                                    }
-                                }
-                            }
-                            if (watchEnabled) {
-                            HorizontalDivider(Modifier.padding(start = 76.dp, end = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
-                            val watch = connected.firstOrNull() ?: lastWatch
-                            val title = when {
-                                connected.size > 1 -> connected.joinToString(" + ") { it.model }
-                                watch != null -> watch.model
-                                BarcodeStore.demo.value -> "Pebble 2 Duo"
-                                else -> "Pebble"
-                            }
-                            val otherApp = watchStatus == WatchStatus.OTHER_APP_OPEN
-                            StatusItem(
-                                icon = R.drawable.ic_watch,
-                                title = title,
-                                text = s.watchStatus(watchStatus).replaceFirstChar { it.uppercase() },
-                                action = if (otherApp) s.tapToOpenWatchapp else null,
-                                onClick = if (otherApp) ({ BarcodeSync.openWatchapp(this@MainActivity) }) else null,
-                            ) {
-                                StatusDot(
-                                    when (watchStatus) {
-                                        WatchStatus.RECEIVED -> MaterialTheme.colorScheme.primary
-                                        WatchStatus.UNKNOWN, WatchStatus.OTHER_APP_OPEN ->
-                                            if (connected.isNotEmpty()) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.outline
-                                        else -> MaterialTheme.colorScheme.error
-                                    },
-                                )
-                            }
-                            }
+            // One page per account under the chips: a swipe anywhere on the screen switches.
+            val pages: @Composable () -> Unit = {
+                HorizontalPager(pager, Modifier.fillMaxSize(), pageSpacing = 16.dp, verticalAlignment = Alignment.Top) { page ->
+                    val a = accounts.getOrNull(page) ?: return@HorizontalPager
+                    val code by a.shown.collectAsStateWithLifecycle()
+                    val sessionLost by a.loginNeeded.collectAsStateWithLifecycle()
+                    val loggedIn by a.loggedIn.collectAsStateWithLifecycle()
+                    // loginNeeded lives only in memory: after a restart the persisted loggedIn = false must
+                    // still show the "session ended" card over an old code (a background run found it out).
+                    val loginNeeded = (sessionLost || !loggedIn) && !demo
+                    Column(
+                        Modifier.fillMaxSize().verticalScroll(scrolls.getOrElse(page) { rememberScrollState() }).padding(horizontal = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        BarcodeCard(a, now, onEnlarge = { fullscreen = true }, onWatch = { watchSheet = true })
+                        AnimatedVisibility(loginNeeded) { SessionCard(a, fresh = code == null) }
+                        AnimatedVisibility(vpn && !demo) { VpnCard() }
+                        UpdateCard(skippable = true)
+                        if (canRefresh) {
+                            Text(
+                                s.pullHint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                            )
                         }
+                        Spacer(Modifier.height(72.dp))  // room for the FAB
                     }
-
-                    if (canRefresh) {
-                        PillButton(
-                            account.provider.text(s.myOrders), R.drawable.ic_shopping_bag,
-                            {
-                                if (BarcodeStore.demo.value) Toast.makeText(this@MainActivity, s.demoOrders, Toast.LENGTH_SHORT).show()
-                                else LoginActivity.openPage(this@MainActivity, account, account.provider.ordersUrl)
-                            },
-                            Modifier.fillMaxWidth(), tonal = true,
-                        )
-                        Text(
-                            s.pullHint, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
-                        )
-                    }
-                    Spacer(Modifier.height(72.dp))  // room for the FAB
                 }
             }
-            Box(Modifier.padding(padding)) {
-                if (canRefresh) {
-                    PullToRefreshBox(
-                        isRefreshing = busy,
-                        onRefresh = { BarcodeSync.refreshAndSend(this@MainActivity, account) },
-                        modifier = Modifier.fillMaxSize(),
-                    ) { content() }
-                } else content()
+            Column(Modifier.padding(padding)) {
+                AccountChips(accounts, pager.currentPage, Modifier.padding(horizontal = 16.dp)) { scope.launch { pager.animateScrollToPage(it) } }
+                // Pulled down, the pages come after the finger and the line in the gap says what letting go does.
+                Box(Modifier.weight(1f).nestedScroll(refresher.connection)) {
+                    PullRefreshLine(refresher, pullAt)
+                    Box(Modifier.fillMaxSize().graphicsLayer { translationY = refresher.pull }) { pages() }
+                }
             }
         }
 
         val b = barcode
         if (fullscreen && b != null) FullscreenBarcode(b) { fullscreen = false }
+        if (watchSheet) WatchSheet(accounts) { watchSheet = false }
+        if (choosing.value) {
+            AlertDialog(
+                onDismissRequest = { choosing.value = false },
+                icon = { Ic(R.drawable.ic_add) },
+                title = { Text(s.chooseMarketplace) },
+                text = {
+                    Column {
+                        Provider.entries.forEach { p ->
+                            NavRow(R.drawable.ic_shopping_bag, p.fullName, null) { addAccount(p) }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = { TextButton(onClick = { choosing.value = false }) { Text(s.cancel) } },
+            )
+        }
     }
 
+    /** One chip per account (a red dot when it needs a look) and "Add account" at the end. */
     @Composable
-    private fun PagerDots(count: Int, current: Int) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            repeat(count) { i ->
-                val width by animateDpAsState(if (i == current) 20.dp else 8.dp, label = "dot")
-                Box(
-                    Modifier.padding(horizontal = 3.dp).size(width, 8.dp).clip(CircleShape)
-                        .background(if (i == current) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
+    private fun AccountChips(accounts: List<Account>, current: Int, modifier: Modifier = Modifier, onSelect: (Int) -> Unit) {
+        val s = LocalStrings.current
+        val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
+        Row(
+            modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            accounts.forEachIndexed { i, a ->
+                val name by a.name.collectAsStateWithLifecycle()
+                val b by a.shown.collectAsStateWithLifecycle()
+                val lost by a.loginNeeded.collectAsStateWithLifecycle()
+                val loggedIn by a.loggedIn.collectAsStateWithLifecycle()
+                val code = b
+                val attention = !demo && (lost || !loggedIn || code != null && BarcodeSync.isStale(code))
+                FilterChip(
+                    selected = i == current,
+                    onClick = { onSelect(i) },
+                    label = { Text(a.label(name), style = MaterialTheme.typography.labelLarge, maxLines = 1) },
+                    leadingIcon = { Box(Modifier.size(10.dp).clip(CircleShape).background(providerColor(a.provider))) },
+                    trailingIcon = if (attention) ({ Box(Modifier.size(8.dp).clip(CircleShape).background(MaterialTheme.colorScheme.error)) }) else null,
                 )
             }
+            AssistChip(
+                onClick = { addAccount() },
+                label = { Text(s.addAccount, style = MaterialTheme.typography.labelLarge, maxLines = 1) },
+                leadingIcon = { Ic(R.drawable.ic_add, Modifier.size(18.dp)) },
+            )
         }
     }
 
     @Composable
-    private fun BarcodeCard(barcode: Barcode?, busy: Boolean, title: String, provider: Provider, onEnlarge: () -> Unit) {
+    private fun BarcodeCard(account: Account, now: Long, onEnlarge: () -> Unit, onWatch: () -> Unit) {
         val s = LocalStrings.current
+        val barcode by account.shown.collectAsStateWithLifecycle()
+        val busy by account.busy.collectAsStateWithLifecycle()
+        val name by account.name.collectAsStateWithLifecycle()
+        val loggedIn by account.loggedIn.collectAsStateWithLifecycle()
+        val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
+        val watchEnabled by BarcodeStore.watchEnabled.collectAsStateWithLifecycle()
+        val provider = account.provider
+        val title = provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
         val source = remember { MutableInteractionSource() }
         val shape = MaterialTheme.shapes.extraLarge
         Surface(
@@ -397,37 +452,178 @@ class MainActivity : BaseActivity() {
             shape = shape,
             modifier = Modifier.fillMaxWidth().pressScale(source, 0.98f).focusRing(source, shape),
         ) {
-            Column(
-                Modifier
-                    .clickable(source, LocalIndication.current, enabled = barcode != null, onClick = onEnlarge)
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                if (barcode == null) {
-                    Text(
-                        provider.text(if (busy) s.gettingBarcode else s.noBarcode),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape))
-                    return@Column
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+            Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                val b = barcode
+                Column(
+                    Modifier
+                        .clickable(source, LocalIndication.current, enabled = b != null, onClick = onEnlarge)
+                        .padding(start = 20.dp, end = 20.dp, top = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (b == null) {
                         Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, maxLines = 1)
                         Text(
-                            barcode.visible, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Medium, maxLines = 1,
+                            provider.text(if (busy) s.gettingBarcode else s.noBarcode),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (busy) LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape))
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, maxLines = 1)
+                                Text(
+                                    b.visible, style = MaterialTheme.typography.headlineSmall, fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Medium, maxLines = 1,
+                                )
+                            }
+                            FilledTonalIconButton(onClick = onEnlarge) { Ic(R.drawable.ic_fullscreen, description = s.enlarge) }
+                        }
+                        val qr = b.format == CodeFormat.QR
+                        PickupCodeView(b, Modifier.fillMaxWidth().height(if (qr) 200.dp else 132.dp))
+                        Text(
+                            if (qr) s.showQrToStaff else s.showToStaff, style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
                         )
                     }
-                    FilledTonalIconButton(onClick = onEnlarge) { Ic(R.drawable.ic_fullscreen, description = s.enlarge) }
                 }
-                val qr = barcode.format == CodeFormat.QR
-                PickupCodeView(barcode, Modifier.fillMaxWidth().height(if (qr) 200.dp else 132.dp))
+                // When it was updated, whether the watch has it, and this account's orders.
+                if (b != null) {
+                    FlowRow(
+                        Modifier.padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        val stale = BarcodeSync.isStale(b)
+                        val colors = MaterialTheme.colorScheme
+                        if (busy) CardTag(R.drawable.ic_refresh, s.refreshing, colors.surfaceContainerHighest, colors.onSurfaceVariant)
+                        else CardTag(
+                            R.drawable.ic_schedule,
+                            s.receivedWhen(b.fetchedAt, now) + if (stale) " · ${s.stale}" else "",
+                            if (stale) colors.errorContainer else colors.surfaceContainerHighest,
+                            if (stale) colors.onErrorContainer else colors.onSurfaceVariant,
+                        )
+                        if (watchEnabled) WatchTag(account, b, onWatch)
+                    }
+                }
+                if (loggedIn || demo) {
+                    PillButton(
+                        provider.text(s.myOrders), R.drawable.ic_shopping_bag,
+                        {
+                            if (demo) Toast.makeText(this@MainActivity, s.demoOrders, Toast.LENGTH_SHORT).show()
+                            else LoginActivity.openPage(this@MainActivity, account, provider.ordersUrl)
+                        },
+                        Modifier.fillMaxWidth().padding(horizontal = 20.dp), tonal = true,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Small rounded label under the code; tappable when [onClick] is given. */
+    @Composable
+    private fun CardTag(icon: Int, text: String, container: Color, content: Color, onClick: (() -> Unit)? = null) {
+        val inner: @Composable () -> Unit = {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                Ic(icon, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                AnimatedContent(text, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "tag") {
+                    Text(it, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+        val c by animateColorAsState(container, label = "tag")
+        // No 48 dp touch padding: it would push a tappable tag below its plain neighbour.
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+            if (onClick == null) Surface(color = c, contentColor = content, shape = CircleShape, content = inner)
+            else Surface(onClick = onClick, color = c, contentColor = content, shape = CircleShape, content = inner)
+        }
+    }
+
+    /** "On the watch" while the watch has this very code; else why not (a problem in red). */
+    @Composable
+    private fun WatchTag(account: Account, b: Barcode, onClick: () -> Unit) {
+        val s = LocalStrings.current
+        val at by account.onWatchAt.collectAsStateWithLifecycle()
+        val status by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
+        val colors = MaterialTheme.colorScheme
+        when {
+            at == b.fetchedAt -> CardTag(R.drawable.ic_check, s.onWatch, colors.primaryContainer, colors.onPrimaryContainer, onClick)
+            status.isProblem() -> CardTag(R.drawable.ic_watch, s.watchStatus(status), colors.errorContainer, colors.onErrorContainer, onClick)
+            else -> CardTag(R.drawable.ic_watch, s.notOnWatch, colors.surfaceContainerHighest, colors.onSurfaceVariant, onClick)
+        }
+    }
+
+    /** Watch icon in the top bar with a status dot; opens [WatchSheet]. */
+    @Composable
+    private fun WatchButton(onClick: () -> Unit) {
+        val s = LocalStrings.current
+        val status by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
+        val connected by Watches.connected.collectAsStateWithLifecycle()
+        val dot by animateColorAsState(watchDotColor(status, connected.isNotEmpty()), label = "watchDot")
+        IconButton(onClick = onClick) {
+            BadgedBox(badge = { Badge(containerColor = dot) }) {
+                Ic(R.drawable.ic_watch, description = s.watchTitle)
+            }
+        }
+    }
+
+    /** The watch: model, last send result, which codes it has, and a way to open the watchapp. */
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    private fun WatchSheet(accounts: List<Account>, onClose: () -> Unit) {
+        val s = LocalStrings.current
+        val status by BarcodeStore.watchStatus.collectAsStateWithLifecycle()
+        val connected by Watches.connected.collectAsStateWithLifecycle()
+        val lastWatch by Watches.last.collectAsStateWithLifecycle()
+        val deliveredAt by BarcodeStore.deliveredAt.collectAsStateWithLifecycle()
+        val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
+        ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                val watch = connected.firstOrNull() ?: lastWatch
+                val title = when {
+                    connected.size > 1 -> connected.joinToString(" + ") { it.model }
+                    watch != null -> watch.model
+                    demo -> "Pebble 2 Duo"
+                    else -> "Pebble"
+                }
+                StatusItem(R.drawable.ic_watch, title, s.watchStatus(status).replaceFirstChar { it.uppercase() }) {
+                    StatusDot(watchDotColor(status, connected.isNotEmpty()))
+                }
+                if (deliveredAt > 0) {
+                    Text(
+                        s.lastDelivered(s.receivedWhen(deliveredAt)), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
                 Text(
-                    if (qr) s.showQrToStaff else s.showToStaff, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
+                    s.watchCodes, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp),
                 )
+                accounts.forEach { a ->
+                    val name by a.name.collectAsStateWithLifecycle()
+                    val b by a.shown.collectAsStateWithLifecycle()
+                    val at by a.onWatchAt.collectAsStateWithLifecycle()
+                    val code = b
+                    val on = code != null && at == code.fetchedAt
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(providerColor(a.provider)))
+                        Spacer(Modifier.width(12.dp))
+                        Text(a.label(name), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(
+                            if (on) s.onWatch else s.notOnWatch, style = MaterialTheme.typography.bodyMedium,
+                            color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (connected.isNotEmpty() || demo) {
+                    Spacer(Modifier.height(8.dp))
+                    PillButton(
+                        s.openWatchapp, R.drawable.ic_watch,
+                        { BarcodeSync.openWatchapp(this@MainActivity); onClose() },
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp), tonal = true,
+                    )
+                }
             }
         }
     }

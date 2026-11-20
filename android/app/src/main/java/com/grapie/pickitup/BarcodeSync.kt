@@ -242,6 +242,14 @@ object BarcodeSync {
                     put(WatchKeys.TIMEOUT, PebbleDictionaryItem.Int32(BarcodeStore.exitTimeout.value))
                 }
                 res = sender.sendDataToPebble(WatchKeys.APP_UUID, dict)
+                if (res?.values?.firstOrNull() == TransmissionResult.Success) {
+                    account.markOnWatch(b)
+                    BarcodeStore.setDeliveredAt(System.currentTimeMillis())
+                } else if (res == null && BarcodeStore.demo.value) {
+                    // Demo without the Pebble app (emulator screenshots): as if every code went.
+                    accounts.forEach { it.markOnWatch(it.shown.value) }
+                    BarcodeStore.setDeliveredAt(System.currentTimeMillis())
+                }
                 // Not delivered (watch gone, other app open): the rest won't go either.
                 if (res?.values?.firstOrNull() != TransmissionResult.Success) break
             }

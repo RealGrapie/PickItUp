@@ -204,10 +204,20 @@ class SettingsActivity : BaseActivity() {
             }
 
             SectionCard(s.sectionAccount, R.drawable.ic_lock) {
-                accounts.forEach { a ->
+                // Order of the chips and of the watch's list: drag a row by its handle; on drop the
+                // new order is saved and the watchapp gets it at once if open.
+                ReorderableColumn(accounts, key = { it.id }, onDrop = {
+                    Accounts.reorder(it)
+                    BarcodeSync.sendToWatchAsync(this@SettingsActivity)
+                }) { a, handle ->
                     val name by a.name.collectAsStateWithLifecycle()
                     val on by a.loggedIn.collectAsStateWithLifecycle()
-                    NavRow(R.drawable.ic_person, a.label(name), if (on) s.accountLoggedIn else s.accountLoggedOut) { sheetFor = a.id }
+                    NavRow(
+                        R.drawable.ic_person, a.label(name), if (on) s.accountLoggedIn else s.accountLoggedOut,
+                        trailing = if (accounts.size < 2) null else ({
+                            Ic(R.drawable.ic_drag_handle, handle.padding(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant, description = s.reorder)
+                        }),
+                    ) { sheetFor = a.id }
                 }
                 NavRow(R.drawable.ic_add, s.addAccount, null, onClick = ::addAccount)
                 NavRow(R.drawable.ic_bug, s.openDebug, s.debugHint, onClick = onDebug)

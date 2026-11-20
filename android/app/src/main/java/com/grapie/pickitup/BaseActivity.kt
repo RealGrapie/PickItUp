@@ -242,7 +242,12 @@ internal fun SwitchRow(title: String, subtitle: String?, checked: Boolean, onCha
 }
 
 @Composable
-internal fun NavRow(icon: Int, title: String, subtitle: String?, tint: Color? = null, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun NavRow(
+    icon: Int, title: String, subtitle: String?, tint: Color? = null, enabled: Boolean = true,
+    /** In place of the chevron (e.g. buttons of its own). */
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     val disabled = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     val iconTint = if (!enabled) disabled else tint ?: MaterialTheme.colorScheme.onSurfaceVariant
     ListItem(
@@ -251,7 +256,7 @@ internal fun NavRow(icon: Int, title: String, subtitle: String?, tint: Color? = 
             Text(title, style = MaterialTheme.typography.bodyLarge, color = if (!enabled) disabled else tint ?: Color.Unspecified)
         },
         supportingContent = subtitle?.let { { Text(it, color = if (enabled) Color.Unspecified else disabled) } },
-        trailingContent = { if (enabled) Ic(R.drawable.ic_chevron_right, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        trailingContent = trailing ?: { if (enabled) Ic(R.drawable.ic_chevron_right, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
         modifier = Modifier.clickable(enabled = enabled, onClick = onClick),
     )

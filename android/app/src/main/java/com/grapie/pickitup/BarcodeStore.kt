@@ -30,6 +30,8 @@ object BarcodeStore {
     val demo = MutableStateFlow(false)
     private var demoAt = System.currentTimeMillis()
     val watchStatus = MutableStateFlow(WatchStatus.UNKNOWN)
+    /** When the watch last took a code (persisted; 0 = never). */
+    val deliveredAt = MutableStateFlow(0L)
     /** Seconds without button presses before the watchapp closes itself; 0 = never. */
     val exitTimeout = MutableStateFlow(120)
     /** Refresh every [refreshHours] or daily at [dailyMinutes] (see [RefreshSchedule]). */
@@ -57,6 +59,7 @@ object BarcodeStore {
         openWatchappAfterRefresh.value = prefs.getBoolean("openWatchappAfterRefresh", false)
         watchEnabled.value = prefs.getBoolean("watchEnabled", true)
         demo.value = prefs.getBoolean("demo", false)
+        deliveredAt.value = prefs.getLong("deliveredAt", 0L)
         log.value = prefs.getString("journal", null)?.split('\n').orEmpty()
     }
 
@@ -116,6 +119,11 @@ object BarcodeStore {
         prefs.edit().putBoolean("watchEnabled", on).apply()
         watchEnabled.value = on
         if (!on) watchStatus.value = WatchStatus.UNKNOWN
+    }
+
+    fun setDeliveredAt(at: Long) {
+        prefs.edit().putLong("deliveredAt", at).apply()
+        deliveredAt.value = at
     }
 
     fun setExitTimeout(seconds: Int) {

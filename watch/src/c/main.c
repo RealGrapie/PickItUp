@@ -562,10 +562,16 @@ static void canvas_update(Layer *layer, GContext *ctx) {
 }
 
 
+static void menu_color_for(MenuLayer *menu, int row);
+
 // The barcode window and the accounts menu, whichever exist right now.
 static void redraw(void) {
   if (s_canvas) layer_mark_dirty(s_canvas);
-  if (s_menu) menu_layer_reload_data(s_menu);
+  if (s_menu) {
+    // A row may have just changed marketplace (the phone reordered its accounts).
+    menu_color_for(s_menu, menu_layer_get_selected_index(s_menu).row);
+    menu_layer_reload_data(s_menu);
+  }
 }
 
 // Replaces a pending "Updating..." so it never hangs when the phone is gone.
@@ -782,7 +788,7 @@ static void down_click(ClickRecognizerRef recognizer, void *context) {
     if (s_menu) menu_layer_set_selected_index(s_menu, MenuIndex(0, s_cur), MenuRowAlignCenter, false);
   }
   restart_exit_timer();
-  redraw();
+  redraw();  // also recolours the menu's highlight for the new row
 }
 
 // BACK closes the companion QR opened with long SELECT; otherwise back to the accounts menu, or
@@ -856,7 +862,17 @@ static void menu_select(MenuLayer *menu, MenuIndex *idx, void *data) {
   window_stack_push(s_window, true);
 }
 
+// The highlight takes the marketplace colour of the row under it (Ozon blue, Wildberries purple).
+static void menu_color_for(MenuLayer *menu, int row) {
+#ifdef PBL_COLOR
+  if (row < 0 || row >= s_count) return;
+  GColor bg = s_acc[row].format == FORMAT_QR ? GColorPurple : GColorBlueMoon;
+  menu_layer_set_highlight_colors(menu, bg, GColorWhite);
+#endif
+}
+
 static void menu_changed(MenuLayer *menu, MenuIndex new_index, MenuIndex old_index, void *data) {
+  menu_color_for(menu, new_index.row);
   restart_exit_timer();
 }
 
@@ -869,9 +885,7 @@ static void menu_load(Window *window) {
     .select_click = menu_select,
     .selection_changed = menu_changed,
   });
-#ifdef PBL_COLOR
-  menu_layer_set_highlight_colors(s_menu, header_bg(), header_fg());
-#endif
+  menu_color_for(s_menu, s_cur);
   menu_layer_set_click_config_onto_window(s_menu, window);
   menu_layer_set_selected_index(s_menu, MenuIndex(0, s_cur), MenuRowAlignCenter, false);
   layer_add_child(root, menu_layer_get_layer(s_menu));
