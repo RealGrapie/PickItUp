@@ -40,7 +40,10 @@ class RefreshJobService : JobService() {
             ", job network=" + (if (params.network != null) "yes" else "none") + "; " + DebugLog.deviceState(applicationContext))
         BarcodeStore.log(AppSettings.strings().logBackground)
         scope.launch {
+            val before = Accounts.list.value.associateWith { it.barcode.value?.code }
             val results = BarcodeSync.refreshAll(applicationContext)
+            // Something new for the watch: a retry after an error mostly fetches the same codes again.
+            val changed = Accounts.list.value.any { it.barcode.value?.code.let { c -> c != null && c != before[it] } }
             // Retry soon if any account failed (the others just get a fresh code again then).
             val failed = results.any { it is FetchResult.Error || it is FetchResult.Vpn }
             val r = results.firstOrNull { it is FetchResult.Error || it is FetchResult.Vpn } ?: results.firstOrNull() ?: FetchResult.LoginNeeded
@@ -48,10 +51,13 @@ class RefreshJobService : JobService() {
             if (results.any { it is FetchResult.Ok }) {
                 BarcodeSync.sendToWatch(applicationContext)
                 // Not open (watchface or another app): start it if asked to; it then requests the new code.
-                // Not connected / no Pebble app: nothing to start.
+                // Not connected / no Pebble app: nothing to start. Only for a code that changed: not on
+                // every half-hourly retry while one account keeps failing.
                 if (BarcodeStore.openWatchappAfterRefresh.value && BarcodeStore.watchStatus.value == WatchStatus.OTHER_APP_OPEN) {
-                    DebugLog.d("job", "watchapp not open: starting it (setting on)")
-                    BarcodeSync.openWatchapp(applicationContext).join()
+                    if (changed) {
+                        DebugLog.d("job", "watchapp not open: starting it (setting on)")
+                        BarcodeSync.openWatchapp(applicationContext).join()
+                    } else DebugLog.d("job", "watchapp not open, no code changed: not starting it")
                 }
             }
             // Keep the process alive while the hidden page settles (rotated login tokens).

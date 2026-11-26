@@ -34,7 +34,7 @@ sealed interface FetchResult {
 
 /**
  * Talks to Ozon through a hidden WebView: the site's antibot only lets real browsers
- * through, so the request is made by fetch() from an ozon.ru page, with the cookies
+ * through, so the request is made by fetch() from an Ozon page (ozon.ru or the account's country site), with the cookies
  * the user got when logging in via [LoginActivity].
  */
 object OzonClient : ProviderClient {
@@ -44,6 +44,37 @@ object OzonClient : ProviderClient {
     private const val ATTEMPTS = 6
     private const val ATTEMPT_TIMEOUT_MS = 10_000L
     private const val RETRY_DELAY_MS = 3_000L
+    private const val DEFAULT_SITE = "https://www.ozon.ru"
+    /**
+     * Ozon's own sites: ozon.ru and, for a delivery address in another country, that country's one
+     * (the Ozon app's verified links, all answering 2026-11-23): ozon.by / .kz / .tm / .uz and
+     * ozon.com with ge. / am. / kg. / az. / mn. / uz. / by.
+     */
+    fun isOzonHost(host: String?): Boolean {
+        val h = host?.removePrefix("www.") ?: return false
+        return h == "ozon.ru" || h.endsWith(".ozon.ru") || Regex("ozon\\.[a-z]{2,3}").matches(h) || h.endsWith(".ozon.com")
+    }
+
+    /** The site a barcode page can be on: the shop itself, not seller./checkout. or similar. */
+    private fun isShopHost(host: String): Boolean {
+        val h = host.removePrefix("www.")
+        return h == "ozon.ru" || (!h.endsWith(".ozon.ru") && isOzonHost(h))
+    }
+
+    /**
+     * Where the account's session lives: www.ozon.ru, or the site of the country Ozon moved it to
+     * (a delivery address in Belarus sends it to ozon.by through /ozonid/domain_redirect, and Ozon
+     * hands the login over there itself). Each site has its own login cookies: token prints and
+     * debug cookies are read from here. Set from the page that gave the last barcode.
+     */
+    fun siteUrl(account: Account): String = account.clientPrefs().getString("site", null) ?: DEFAULT_SITE
+
+    private fun noteSite(account: Account, origin: String) {
+        if (origin == siteUrl(account)) return
+        account.clientPrefs().edit().putString("site", origin).apply()
+        DebugLog.d("fetch", "site of $account is now $origin")
+        BarcodeStore.log(AppSettings.strings().logOzonSite(origin.removePrefix("https://").removePrefix("www.")), account)
+    }
     /** Longest a page lives on after it is done with, waiting for a pair that may still come. */
     const val SETTLE_MS = 8_000L
     private const val SETTLE_POLL_MS = 250L
@@ -210,12 +241,12 @@ object OzonClient : ProviderClient {
             WebProfiles.serviceWorkers(account.profile).setServiceWorkerClient(object : ServiceWorkerClient() {
                 override fun shouldInterceptRequest(request: WebResourceRequest): WebResourceResponse? {
                     if (hiddenPages == 0 || LoginActivity.isOpen) {
-                        if (request.url.host?.endsWith("ozon.ru") == true) DebugLog.d("sw", "pass (site) ${request.method} ${DebugLog.url(request.url.toString())}")
+                        if (isOzonHost(request.url.host)) DebugLog.d("sw", "pass (site) ${request.method} ${DebugLog.url(request.url.toString())}")
                         return null
                     }
                     // An error, not "{}": the worker may cache what it gets and serve it to the visible site.
                     val stub = stubbed(request)
-                    if (request.url.host?.endsWith("ozon.ru") == true)
+                    if (isOzonHost(request.url.host))
                         DebugLog.d("sw", "${if (stub) "STUB 503" else "pass"} ${request.method} ${DebugLog.url(request.url.toString())}")
                     return if (stub) unavailable() else null
                 }
@@ -229,7 +260,7 @@ object OzonClient : ProviderClient {
     /** Requests the hidden page doesn't need that could still rotate the login pair. */
     private fun stubbed(request: WebResourceRequest): Boolean {
         val url = request.url
-        if (url.host?.endsWith("ozon.ru") != true) return false
+        if (!isOzonHost(url.host)) return false
         val path = url.path.orEmpty()
         if (path.endsWith("/prefetchBarcode")) return false
         if (path.startsWith("/api/")) return true
@@ -241,7 +272,7 @@ object OzonClient : ProviderClient {
 
     /** Journal-safe fingerprint of the login tokens: short name + 4 hex of SHA-256, never a value. */
     private fun tokenPrint(account: Account): String {
-        val tokens = WebProfiles.cookies(account.profile).getCookie("https://www.ozon.ru")
+        val tokens = WebProfiles.cookies(account.profile).getCookie(siteUrl(account))
             ?.split(';')?.map { it.trim() }
             ?.filter { it.substringBefore('=').contains("token", ignoreCase = true) }
             .orEmpty()
@@ -293,6 +324,7 @@ object OzonClient : ProviderClient {
         var attempts = 0
         var sentAt = 0L          // 0 = no fetch in flight
         var pageReady = false
+        var pageOrigin = DEFAULT_SITE  // the Ozon site the page is on: our fetch goes there
         var lastError = AppSettings.strings().timeout
 
         val key = UUID.randomUUID().toString()
@@ -303,7 +335,10 @@ object OzonClient : ProviderClient {
                 DebugLog.d("fetch", "answer #$attempts: " + describeBody(status, body))
                 if (!cont.isActive) return@post
                 sentAt = 0
-                parse(status, body, account)?.let { cont.resume(it); return@post }
+                parse(status, body, account)?.let {
+                    if (it is FetchResult.Ok) noteSite(account, pageOrigin)
+                    cont.resume(it); return@post
+                }
                 lastError = "HTTP $status: ${body.take(80).trim()}"
             }
         }, "OzonBridge")
@@ -314,13 +349,13 @@ object OzonClient : ProviderClient {
             // Answer them here, so only the document and our fetch ever touch the session.
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val stub = stubbed(request)
-                if (request.url.host?.endsWith("ozon.ru") == true) DebugLog.d("page",
+                if (isOzonHost(request.url.host)) DebugLog.d("page",
                     "${if (!stub) "pass" else if (request.url.path.orEmpty().startsWith("/api/")) "STUB {}" else "STUB 503"} " +
                         "${request.method} ${DebugLog.url(request.url.toString())}${if (request.isForMainFrame) " (document)" else ""}")
                 if (!stub) return null
                 if (!request.url.path.orEmpty().startsWith("/api/")) return unavailable()
                 return WebResourceResponse("application/json", "utf-8", 200, "OK",
-                    mapOf("Access-Control-Allow-Origin" to "https://www.ozon.ru"), "{}".byteInputStream())
+                    mapOf("Access-Control-Allow-Origin" to "https://${request.url.host}"), "{}".byteInputStream())
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
@@ -333,7 +368,17 @@ object OzonClient : ProviderClient {
                 // The document load is what rotates an expired pair: on disk now, not only at the
                 // answer - people swipe the app away from Recents right after tapping refresh.
                 WebProfiles.cookies(account.profile).flush()
-                if (url.startsWith("https://www.ozon.ru")) pageReady = true
+                // ozon.ru, or the site of the country Ozon sent the account to (a delivery address in
+                // Belarus: ozon.by via /ozonid/domain_redirect). That site has the same API and its own
+                // session, so the fetch (a relative URL) goes to whichever the page is on. A page of
+                // another site can also be a stop on the way back to ozon.ru (seen): an antibot answer
+                // there just gets retried on the next page.
+                val uri = android.net.Uri.parse(url)
+                val host = uri.host.orEmpty()
+                if (uri.scheme == "https" && isShopHost(host)) {
+                    pageReady = true
+                    pageOrigin = "https://$host"
+                }
             }
 
             override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
@@ -360,7 +405,7 @@ object OzonClient : ProviderClient {
                     attempts++
                     sentAt = now
                     Log.d(TAG, "fetch attempt $attempts")
-                    DebugLog.d("fetch", "attempt $attempts")
+                    DebugLog.d("fetch", "attempt $attempts" + if (pageOrigin != DEFAULT_SITE) " on $pageOrigin" else "")
                     web.evaluateJavascript(fetchJs(key), null)
                 }
                 main.postDelayed(this, RETRY_DELAY_MS)

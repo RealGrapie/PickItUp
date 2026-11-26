@@ -53,9 +53,9 @@ object DebugLog {
         }.onFailure { Log.w("DebugLog", "write failed", it) }
     }
 
-    /** name -> print of every ozon.ru cookie; values never leave this map unhashed. */
+    /** name -> print of every cookie of the account's Ozon site; values never leave this map unhashed. */
     fun cookies(account: Account = Accounts.active): Map<String, String> =
-        WebProfiles.cookies(account.profile).getCookie("https://www.ozon.ru")
+        WebProfiles.cookies(account.profile).getCookie(OzonClient.siteUrl(account))
             ?.split(';')?.map { it.trim() }?.filter { '=' in it }
             ?.associate { c -> c.substringBefore('=') to describe(c.substringBefore('='), c.substringAfter('=')) }
             .orEmpty()

@@ -140,6 +140,7 @@ class Strings(
     val logWatchAsked: String,
     val logWatchAskedRefresh: String,
     val timeout: String,
+    val logOzonSite: (String) -> String,
     // Battery optimization
     val batteryTitle: String,
     val batteryText: String,
@@ -366,6 +367,7 @@ class Strings(
             logWatchAsked = "⌚ watchapp запросил код",
             logWatchAskedRefresh = "⌚ watchapp просит обновить",
             timeout = "Ozon не ответил вовремя",
+            logOzonSite = { "🌍 Ozon перевёл аккаунт на сайт $it" },
             batteryTitle = "Работа в фоне",
             batteryText = "Чтобы watchapp получал код, даже когда $APP_NAME на телефоне закрыт, разрешите приложению работать без ограничений батареи. Расход заряда почти не изменится: приложение просыпается, только когда watchapp просит код или подошло время обновления.",
             allow = "Разрешить",
@@ -587,6 +589,7 @@ class Strings(
             logWatchAsked = "⌚ Watchapp asked for the code",
             logWatchAskedRefresh = "⌚ Watchapp asked to refresh",
             timeout = "Ozon didn't answer in time",
+            logOzonSite = { "🌍 Ozon moved the account to $it" },
             batteryTitle = "Background work",
             batteryText = "To let the watchapp get the code even when $APP_NAME on the phone is closed, allow the app to run without battery restrictions. Battery use barely changes: the app only wakes up when the watchapp asks for the code or a refresh is due.",
             allow = "Allow",
