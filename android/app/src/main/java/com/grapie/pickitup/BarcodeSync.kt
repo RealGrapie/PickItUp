@@ -195,6 +195,8 @@ object BarcodeSync {
             is FetchResult.Error -> BarcodeStore.log(s.logError(r.message), account)
             FetchResult.Vpn -> Unit  // never comes from OzonClient
         }
+        // Shown on the code card; a lost login has its own card instead.
+        account.setError((r as? FetchResult.Error)?.message)
         r
     }
 

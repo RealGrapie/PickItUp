@@ -77,6 +77,14 @@ class Account internal constructor(
     /** The last request said the login is gone (the main screen offers to log in again). */
     val loginNeeded = MutableStateFlow(false)
     val busy = MutableStateFlow(false)
+    /** Why the last refresh failed (null = it worked); persisted, so a failed background refresh shows too. */
+    val lastError = MutableStateFlow(prefs.getString("lastError", null))
+
+    fun setError(message: String?) {
+        if (message == lastError.value) return
+        prefs.edit().putString("lastError", message).apply()
+        lastError.value = message
+    }
     /**
      * `fetchedAt` of the code the watch last took for this account (0 = none). It is "on the watch"
      * while that is still [shown]: a Wildberries week shares one fetch time, so the watch's own

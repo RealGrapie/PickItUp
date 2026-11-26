@@ -416,8 +416,9 @@ class MainActivity : BaseActivity() {
                 val b by a.shown.collectAsStateWithLifecycle()
                 val lost by a.loginNeeded.collectAsStateWithLifecycle()
                 val loggedIn by a.loggedIn.collectAsStateWithLifecycle()
+                val failed by a.lastError.collectAsStateWithLifecycle()
                 val code = b
-                val attention = !demo && (lost || !loggedIn || code != null && BarcodeSync.isStale(code))
+                val attention = !demo && (lost || !loggedIn || failed != null || code != null && BarcodeSync.isStale(code))
                 FilterChip(
                     selected = i == current,
                     onClick = { onSelect(i) },
@@ -443,8 +444,10 @@ class MainActivity : BaseActivity() {
         val loggedIn by account.loggedIn.collectAsStateWithLifecycle()
         val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
         val watchEnabled by BarcodeStore.watchEnabled.collectAsStateWithLifecycle()
+        val error by account.lastError.collectAsStateWithLifecycle()
+        var errorShown by remember { mutableStateOf(false) }
         val provider = account.provider
-        val title = provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
+        val title =provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
         val source = remember { MutableInteractionSource() }
         val shape = MaterialTheme.shapes.extraLarge
         Surface(
@@ -487,24 +490,40 @@ class MainActivity : BaseActivity() {
                         )
                     }
                 }
-                // When it was updated, whether the watch has it, and this account's orders.
-                if (b != null) {
+                // When it was updated, whether the last refresh failed, whether the watch has it.
+                val failed = error.takeIf { !busy && !demo && loggedIn }
+                if (b != null || failed != null) {
                     FlowRow(
                         Modifier.padding(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        val stale = BarcodeSync.isStale(b)
                         val colors = MaterialTheme.colorScheme
                         if (busy) CardTag(R.drawable.ic_refresh, s.refreshing, colors.surfaceContainerHighest, colors.onSurfaceVariant)
-                        else CardTag(
-                            R.drawable.ic_schedule,
-                            s.receivedWhen(b.fetchedAt, now) + if (stale) " · ${s.stale}" else "",
-                            if (stale) colors.errorContainer else colors.surfaceContainerHighest,
-                            if (stale) colors.onErrorContainer else colors.onSurfaceVariant,
-                        )
-                        if (watchEnabled) WatchTag(account, b, onWatch)
+                        else if (b != null) {
+                            val stale = BarcodeSync.isStale(b)
+                            CardTag(
+                                R.drawable.ic_schedule,
+                                s.receivedWhen(b.fetchedAt, now) + if (stale) " · ${s.stale}" else "",
+                                if (stale) colors.errorContainer else colors.surfaceContainerHighest,
+                                if (stale) colors.onErrorContainer else colors.onSurfaceVariant,
+                            )
+                        }
+                        if (watchEnabled && b != null) WatchTag(account, b, onWatch)
+                        if (failed != null) CardTag(R.drawable.ic_cloud_off, s.refreshFailed, colors.errorContainer, colors.onErrorContainer) { errorShown = true }
                     }
+                }
+                if (errorShown && failed != null) {
+                    AlertDialog(
+                        onDismissRequest = { errorShown = false },
+                        icon = { Ic(R.drawable.ic_cloud_off) },
+                        title = { Text(s.refreshFailed) },
+                        text = { Text(failed) },
+                        confirmButton = {
+                            TextButton(onClick = { errorShown = false; BarcodeSync.refreshAndSend(this@MainActivity, account) }) { Text(s.retry) }
+                        },
+                        dismissButton = { TextButton(onClick = { errorShown = false }) { Text(s.ok) } },
+                    )
                 }
                 if (loggedIn || demo) {
                     PillButton(

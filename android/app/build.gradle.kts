@@ -21,7 +21,7 @@ android {
     targetSdk = 37
     // Set by hand for every release; it must match the GitHub tag ("1.6-beta.1" <-> v1.6-beta.1),
     // the updater compares the two. versionCode comes from the build time (BuildTime below).
-    versionName = "1.6-beta.2"
+    versionName = "1.6-beta.3"
   }
 
   signingConfigs {

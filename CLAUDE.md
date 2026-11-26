@@ -201,6 +201,15 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   queues them forever. Use `Handler(Looper.getMainLooper())`.
 - Ozon replaces the document right after load, killing an in-flight `fetch` silently. `OzonClient`
   polls and re-sends the fetch if no answer within 10 s; don't fire once from `onPageFinished`.
+- Other countries' Ozon sites (2026-11-26): a delivery address in e.g. Belarus makes `www.ozon.ru/`
+  302 to `/ozonid/domain_redirect?domain=ozon.by` -> SSO hand-over -> ozon.by with its OWN login
+  cookies. The same `prefetchBarcode` works there (relative URL, same-origin), so `OzonClient` fetches
+  on whichever shop host the page landed on (`isOzonHost`: ozon.by/.kz/.tm/.uz, *.ozon.com) and
+  remembers it per account (`siteUrl`, prefs "site"; token prints / debug cookies read from it). The
+  stubs and SW guard cover all Ozon hosts. `isLoggedIn` still reads ozon.ru (the RU session stays).
+  A Russian account opened on ozon.by is bounced back to ozon.ru (sometimes via an antibot page).
+- Refresh errors: `Account.lastError` (persisted) -> red "Не удалось обновить" tag on the code card
+  (tap = message + retry) and the chip's red dot; cleared by the next Ok / LoginNeeded.
 - Login tokens rotate (Reqable capture, 2026-11-01): `__Secure-access-token` lives 2 h
   (`expiresIn: 7200`; cookies themselves expire in a year); a request after that gets a new
   access + refresh pair in Set-Cookie - the document load AND the page's own API calls
