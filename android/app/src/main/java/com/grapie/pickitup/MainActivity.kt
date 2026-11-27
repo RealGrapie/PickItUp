@@ -533,8 +533,7 @@ class MainActivity : BaseActivity() {
                         dismissButton = { TextButton(onClick = { errorShown = false }) { Text(s.ok) } },
                     )
                 }
-                // CDEK: the cabinet does not keep our login (it asks for the phone and a captcha again).
-                if ((loggedIn || demo) && provider != Provider.CDEK) {
+                if (loggedIn || demo) {
                     PillButton(
                         provider.text(s.myOrders), R.drawable.ic_shopping_bag,
                         {

@@ -241,10 +241,11 @@ class LoginActivity : ComponentActivity() {
             // and the cookie watcher closes the window.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
-                // CDEK: our PKCE login came back. The site must not load it (it would use the code up).
+                // CDEK: our PKCE login came back. Not cancelled: that dropped the SSO session cookies
+                // the redirect sets (the cabinet then asked to log in again). The page loads, we take the code.
                 if (loginMode && cdek && !finishing && CdekClient.isLoginRedirect(account, url)) {
                     finishCdekLogin(url)
-                    return true
+                    return false
                 }
                 if (url.scheme == "http" || url.scheme == "https") return false
                 openExternally(url.toString())
@@ -252,6 +253,11 @@ class LoginActivity : ComponentActivity() {
             }
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
+                // CDEK login: the site's own code exchange is refused, so our one-time code stays ours.
+                if (loginMode && cdek && request.method == "POST" && request.url.path.orEmpty().endsWith("/openid-connect/token")) {
+                    DebugLog.d("site", "CDEK site token request blocked during our login")
+                    return android.webkit.WebResourceResponse("application/json", "utf-8", 403, "Forbidden", emptyMap(), "{}".byteInputStream())
+                }
                 if (request.url.host == "www.ozon.ru" && (request.isForMainFrame || request.url.path.orEmpty().startsWith("/api/")))
                     DebugLog.d("site", "${request.method} ${DebugLog.url(request.url.toString())}${if (request.isForMainFrame) " (document)" else ""}")
                 return null
