@@ -2,6 +2,8 @@ package com.grapie.pickitup
 
 import android.content.ActivityNotFoundException
 import android.content.Context
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
@@ -164,13 +166,17 @@ class LoginActivity : ComponentActivity() {
     }
 
     private val ozon get() = account.provider == Provider.OZON
+    private val wb get() = account.provider == Provider.WB
+    private val cdek get() = account.provider == Provider.CDEK
     /** When the in-flight localStorage read (WB) started, 0 = none. A read sent while the page
      *  navigates never calls back, so a stale one is given up after [READ_TIMEOUT_MS]. */
     private var readingSince = 0L
 
     private fun checkLoggedIn() {
         if (finishing) return
-        if (!ozon) {
+        // CDEK: the login ends with our own redirect (shouldOverrideUrlLoading), nothing to poll.
+        if (cdek) return
+        if (wb) {
             // Wildberries: the site keeps the token in localStorage once WB ID sends it back here.
             val now = System.currentTimeMillis()
             if (readingSince != 0L && now - readingSince < READ_TIMEOUT_MS) return
@@ -191,6 +197,19 @@ class LoginActivity : ComponentActivity() {
         // A new login, not a lost rotation: the main screen refreshes before this page is gone.
         OzonClient.noteLogin(account)
         loggedIn()
+    }
+
+    private fun finishCdekLogin(url: Uri) {
+        finishing = true
+        DebugLog.d("site", "CDEK login redirect, exchanging the code")
+        lifecycleScope.launch {
+            if (CdekClient.finishLogin(account, url)) loggedIn()
+            else {
+                finishing = false
+                Toast.makeText(this@LoginActivity, AppSettings.strings().cdekLoginFailed, Toast.LENGTH_LONG).show()
+                web.loadUrl(CdekClient.loginUrl(account))
+            }
+        }
     }
 
     private fun loggedIn() {
@@ -222,6 +241,11 @@ class LoginActivity : ComponentActivity() {
             // and the cookie watcher closes the window.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
+                // CDEK: our PKCE login came back. The site must not load it (it would use the code up).
+                if (loginMode && cdek && !finishing && CdekClient.isLoginRedirect(account, url)) {
+                    finishCdekLogin(url)
+                    return true
+                }
                 if (url.scheme == "http" || url.scheme == "https") return false
                 openExternally(url.toString())
                 return true
@@ -290,7 +314,7 @@ class LoginActivity : ComponentActivity() {
         if (ozon) DebugLog.tokens("site", "tokens at open", account)
         if (loginMode) {
             wasGuest = !account.provider.client.isLoggedIn(account)
-            startToken = if (ozon) OzonClient.accessToken(account) else WbClient.token(account)
+            startToken = if (ozon) OzonClient.accessToken(account) else if (wb) WbClient.token(account) else null
             handler.postDelayed(loginWatcher, 1000)
         }
         onBackPressedDispatcher.addCallback(this, webBack)
@@ -309,7 +333,7 @@ class LoginActivity : ComponentActivity() {
             }
         }
 
-        if (savedInstanceState == null) web.loadUrl(pageUrl ?: account.provider.loginUrl) else web.restoreState(savedInstanceState)
+        if (savedInstanceState == null) web.loadUrl(pageUrl ?: account.provider.client.loginUrl(account)) else web.restoreState(savedInstanceState)
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -460,7 +484,7 @@ class LoginActivity : ComponentActivity() {
         if (ozon) {
             OzonClient.noteTokens(account)
             if (!finishing) account.setLoggedIn(OzonClient.isLoggedIn(account))
-        } else if (!finishing) {
+        } else if (wb && !finishing) {
             // Any WB page (orders) may have renewed the token: keep the newest valid one.
             WbClient.readToken(web) { t ->
                 if (t != null && t != WbClient.token(account) && WbClient.expiry(t) > System.currentTimeMillis()) {

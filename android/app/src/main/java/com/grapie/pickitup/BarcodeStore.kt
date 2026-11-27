@@ -83,12 +83,14 @@ object BarcodeStore {
     fun demoBarcode(provider: Provider = Provider.OZON) = when (provider) {
         Provider.OZON -> Barcode(DEMO_CODE, DEMO_VISIBLE, demoAt)
         Provider.WB -> Barcode(DEMO_QR, DEMO_QR_VISIBLE, demoAt, CodeFormat.QR)
+        Provider.CDEK -> Barcode(DEMO_CDEK, DEMO_CDEK, demoAt)
     }
 
     const val DEMO_CODE = "12345678*9012"
     const val DEMO_VISIBLE = "1234 5678 * 9012"
     const val DEMO_QR = "123456789_123456_1"
     const val DEMO_QR_VISIBLE = "123 456"
+    const val DEMO_CDEK = "123456"
 
     fun setRefreshHours(hours: Int) {
         prefs.edit().putInt("refreshHours", hours).apply()

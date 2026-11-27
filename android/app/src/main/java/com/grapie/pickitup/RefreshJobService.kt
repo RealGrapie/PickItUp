@@ -48,7 +48,7 @@ class RefreshJobService : JobService() {
             val failed = results.any { it is FetchResult.Error || it is FetchResult.Vpn }
             val r = results.firstOrNull { it is FetchResult.Error || it is FetchResult.Vpn } ?: results.firstOrNull() ?: FetchResult.LoginNeeded
             // Delivered only if the watchapp is open right now; otherwise it asks on its next start.
-            if (results.any { it is FetchResult.Ok }) {
+            if (results.any { it is FetchResult.Ok || it is FetchResult.Empty }) {
                 BarcodeSync.sendToWatch(applicationContext)
                 // Not open (watchface or another app): start it if asked to; it then requests the new code.
                 // Not connected / no Pebble app: nothing to start. Only for a code that changed: not on

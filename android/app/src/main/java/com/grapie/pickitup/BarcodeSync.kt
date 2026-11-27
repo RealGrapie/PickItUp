@@ -46,6 +46,8 @@ object BarcodeSync {
     private const val FRESH_MS = 5 * 60_000L
     /** Watch footer while "I have a Pebble" is off (ASCII, fits a 144 px line). */
     private const val STATUS_WATCH_OFF = "Off in phone app"
+    /** Watch line for an account with no order waiting (CDEK); the watch shows it under "No code yet". */
+    private const val STATUS_NOTHING = "Nothing to pick up"
 
     fun isStale(b: Barcode?) = b == null || RefreshSchedule.isStale(b.fetchedAt)
 
@@ -106,7 +108,7 @@ object BarcodeSync {
         sendToWatch(context, { if (it in pending) "Updating..." else "" }, force = true)
         for (a in toFetch) {
             results[a] = when (refresh(context, a)) {
-                is FetchResult.Ok -> ""
+                is FetchResult.Ok, FetchResult.Empty -> ""
                 FetchResult.LoginNeeded -> "Log in on phone"
                 FetchResult.Vpn -> "VPN on phone"
                 is FetchResult.Error -> "Update failed"
@@ -183,6 +185,7 @@ object BarcodeSync {
         if (account == Accounts.active && account.provider == Provider.OZON) SessionProbe.onFetch(context, r)
         when (r) {
             is FetchResult.Ok -> {
+                account.setEmpty(0)
                 if (r.days.isNotEmpty()) account.saveDays(r.days) else account.save(r.barcode)
                 account.loginNeeded.value = false
                 // Only the tail: the journal is on the debug screen, which ends up in screenshots.
@@ -194,6 +197,13 @@ object BarcodeSync {
             }
             is FetchResult.Error -> BarcodeStore.log(s.logError(r.message), account)
             FetchResult.Vpn -> Unit  // never comes from OzonClient
+            FetchResult.Empty -> {
+                // Nothing to pick up: the old code is no use any more (CDEK makes a new one per wait).
+                account.clear()
+                account.setEmpty(System.currentTimeMillis())
+                account.loginNeeded.value = false
+                BarcodeStore.log(s.logNoOrders, account)
+            }
         }
         // Shown on the code card; a lost login has its own card instead.
         account.setError((r as? FetchResult.Error)?.message)
@@ -222,7 +232,14 @@ object BarcodeSync {
                 val account = accounts[i]
                 if (only != null && account != only) continue
                 val b = account.shown.value
-                val st = status(account).ifEmpty { if (!account.loggedIn.value && !BarcodeStore.demo.value) "Log in on phone" else "" }
+                val empty = b == null && account.loggedIn.value && account.emptyAt.value > 0
+                val st = status(account).ifEmpty {
+                    when {
+                        !account.loggedIn.value && !BarcodeStore.demo.value -> "Log in on phone"
+                        empty -> STATUS_NOTHING
+                        else -> ""
+                    }
+                }
                 val dict = buildMap {
                     put(WatchKeys.INDEX, PebbleDictionaryItem.Int32(i))
                     put(WatchKeys.COUNT, PebbleDictionaryItem.Int32(accounts.size))
@@ -236,8 +253,8 @@ object BarcodeSync {
                         // the whole message (Ozon messages stay as small as they were).
                         val next = if (BarcodeStore.demo.value) emptyList() else account.upcoming()
                         if (b.format == CodeFormat.QR) put(WatchKeys.DAYS, PebbleDictionaryItem.Text(WatchNames.days(next)))
-                    } else if (!account.loggedIn.value) {
-                        // Logged out: an empty code makes the watch forget the one it stored.
+                    } else if (!account.loggedIn.value || empty) {
+                        // Logged out / nothing to pick up: an empty code makes the watch forget the one it stored.
                         put(WatchKeys.CODE, PebbleDictionaryItem.Text(""))
                     }
                     put(WatchKeys.STATUS, PebbleDictionaryItem.Text(st))

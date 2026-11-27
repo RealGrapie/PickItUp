@@ -16,6 +16,8 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
                         profile, code, login state), Accounts (list, migration of the 1.x login)
   WebProfiles.kt        per-account WebView profiles (androidx.webkit Profile API): cookies, storage
   OzonClient.kt         hidden-WebView fetch of the barcode, login/cookie checks (per account)
+  WbClient.kt           Wildberries: token from the site's localStorage, week of QR codes over plain HTTPS
+  CdekClient.kt         CDEK: own PKCE login on sso.cdek.ru, offline refresh token, pickup code over plain HTTPS
   Net.kt                is this app's traffic on a VPN (per-UID default network)
   BarcodeSync.kt        fetch + push to the watch, WatchKeys (AppMessage keys, watch UUID)
   WatchListenerService  bound by the Pebble app when the watchapp sends a request
@@ -208,6 +210,14 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   remembers it per account (`siteUrl`, prefs "site"; token prints / debug cookies read from it). The
   stubs and SW guard cover all Ozon hosts. `isLoggedIn` still reads ozon.ru (the RU session stays).
   A Russian account opened on ozon.by is bounced back to ozon.ru (sometimes via an antibot page).
+- CDEK (2026-11-28, research/cdek-pickup-code.md): LoginActivity opens `CdekClient.loginUrl` (Keycloak
+  `client_id=superapp`, PKCE, `offline_access`, redirect `https://my.cdek.ru/lkfl`) and catches that
+  redirect in `shouldOverrideUrlLoading` (state must match) -> code exchanged over HttpURLConnection ->
+  refresh token (1 year, rotated on every use) in the account's prefs. Fetch = refresh -> 5-min access ->
+  `GET my.cdek.ru/api/lkfl/v2/pickupCodes/all`. `{"data":null}` = `FetchResult.Empty`: code cleared,
+  `Account.emptyAt`, card "Нет заказов к получению", watch gets an empty Code + Status "Nothing to pick up".
+  A real `pickupCodeInfo.barCode` (Code 128) was not seen live yet. The CDEK cabinet does not keep our
+  login (asks phone + captcha again), so CDEK has no "My orders" button.
 - Refresh errors: `Account.lastError` (persisted) -> red "Не удалось обновить" tag on the code card
   (tap = message + retry) and the chip's red dot; cleared by the next Ok / LoginNeeded.
 - Login tokens rotate (Reqable capture, 2026-11-01): `__Secure-access-token` lives 2 h
@@ -348,7 +358,8 @@ contain session tokens too; the original research captures were removed once the
 
 Not planned (dropped by the user): a watch "Outdated" screen instead of the old code (built
 2026-11-02, patch in `backup/watch-outdated-screen.patch`, gitignored), teens barcode, launching the watchapp from the phone,
-an in-app watchapp updater (the Pebble app updates it from the stores), Ozon orders / notifications.
+an in-app watchapp updater (the Pebble app updates it from the stores), Ozon orders / notifications, Pochta Rossii (code = on-device TOTP after a DSKPP device
+registration, see `research/pochta-pickup-code.md`; too hard, hardly used; dropped 2026-11-28).
 
 - Real-life use (pickup point scan etc.) was tested by the user.
 - License: MIT (`LICENSE`, `README.md` with the "unofficial, not affiliated with Ozon" disclaimer).

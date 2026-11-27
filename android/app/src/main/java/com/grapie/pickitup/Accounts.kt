@@ -11,6 +11,8 @@ interface ProviderClient {
     /** Ozon: from the account's cookies, which loads Chromium, so only where a WebView runs anyway. */
     fun isLoggedIn(account: Account): Boolean
     fun logout(account: Account)
+    /** The page [LoginActivity] opens to log in (CDEK: a fresh PKCE request each time). */
+    fun loginUrl(account: Account): String = account.provider.loginUrl
 
     /** A WebView showing this marketplace's site (login page, orders), before it loads anything. */
     @android.annotation.SuppressLint("SetJavaScriptEnabled")
@@ -34,11 +36,14 @@ enum class Provider(
     // The bare Ozon ID form: one tap shorter than going through the account page.
     OZON("ozon", "Ozon", "Ozon", "https://www.ozon.ru/", "https://www.ozon.ru/ozonid-lite", "https://www.ozon.ru/my/orderlist"),
     // The account page sends a guest to WB ID (phone + SMS) and comes back here once logged in.
-    WB("wb", "WB", "Wildberries", "https://www.wildberries.ru/", "https://www.wildberries.ru/lk", "https://www.wildberries.ru/lk/myorders/delivery");
+    WB("wb", "WB", "Wildberries", "https://www.wildberries.ru/", "https://www.wildberries.ru/lk", "https://www.wildberries.ru/lk/myorders/delivery"),
+    // The login URL is made per attempt (PKCE): CdekClient.loginUrl.
+    CDEK("cdek", "CDEK", "CDEK", "https://my.cdek.ru/", CdekClient.REDIRECT, CdekClient.REDIRECT);
 
     val client: ProviderClient get() = when (this) {
         OZON -> OzonClient
         WB -> WbClient
+        CDEK -> CdekClient
     }
 
     /** One of the app's texts about Ozon, about this marketplace instead (the name isn't declined in RU). */
@@ -77,6 +82,14 @@ class Account internal constructor(
     /** The last request said the login is gone (the main screen offers to log in again). */
     val loginNeeded = MutableStateFlow(false)
     val busy = MutableStateFlow(false)
+    /** When the last refresh found no code because nothing waits to be picked up (CDEK); 0 = not so. */
+    val emptyAt = MutableStateFlow(prefs.getLong("emptyAt", 0L))
+
+    fun setEmpty(at: Long) {
+        if (at == emptyAt.value) return
+        prefs.edit().putLong("emptyAt", at).apply()
+        emptyAt.value = at
+    }
     /** Why the last refresh failed (null = it worked); persisted, so a failed background refresh shows too. */
     val lastError = MutableStateFlow(prefs.getString("lastError", null))
 

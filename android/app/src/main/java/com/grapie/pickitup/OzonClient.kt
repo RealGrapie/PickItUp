@@ -30,6 +30,8 @@ sealed interface FetchResult {
     data class Error(val message: String) : FetchResult
     /** Not tried: the app's traffic goes through a VPN ([Net.vpnActive]). */
     data object Vpn : FetchResult
+    /** Logged in, but no code right now: nothing waits to be picked up (CDEK). */
+    data object Empty : FetchResult
 }
 
 /**

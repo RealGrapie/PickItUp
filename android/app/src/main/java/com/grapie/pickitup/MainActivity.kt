@@ -208,6 +208,10 @@ class MainActivity : BaseActivity() {
                             Provider.WB.text(s.login), R.drawable.ic_login,
                             { login(Accounts.switchProvider(Accounts.active, Provider.WB)) }, Modifier.widthIn(min = 240.dp), tonal = true,
                         )
+                        PillButton(
+                            Provider.CDEK.text(s.login), R.drawable.ic_login,
+                            { login(Accounts.switchProvider(Accounts.active, Provider.CDEK)) }, Modifier.widthIn(min = 240.dp), tonal = true,
+                        )
                     }
                 }
                 Spacer(Modifier.weight(1.3f))
@@ -254,6 +258,7 @@ class MainActivity : BaseActivity() {
     private fun providerColor(p: Provider) = when (p) {
         Provider.OZON -> Color(0xFF005BFF)
         Provider.WB -> Color(0xFFA73AFD)
+        Provider.CDEK -> Color(0xFF1AB248)
     }
 
     @Composable
@@ -445,6 +450,7 @@ class MainActivity : BaseActivity() {
         val demo by BarcodeStore.demo.collectAsStateWithLifecycle()
         val watchEnabled by BarcodeStore.watchEnabled.collectAsStateWithLifecycle()
         val error by account.lastError.collectAsStateWithLifecycle()
+        val emptyAt by account.emptyAt.collectAsStateWithLifecycle()
         var errorShown by remember { mutableStateOf(false) }
         val provider = account.provider
         val title =provider.title.uppercase() + if (name.isBlank()) "" else " · $name"
@@ -457,6 +463,8 @@ class MainActivity : BaseActivity() {
         ) {
             Column(Modifier.padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 val b = barcode
+                // Logged in, checked, nothing waits at a pickup point (CDEK).
+                val nothing = b == null && loggedIn && !demo && emptyAt > 0
                 Column(
                     Modifier
                         .clickable(source, LocalIndication.current, enabled = b != null, onClick = onEnlarge)
@@ -466,7 +474,7 @@ class MainActivity : BaseActivity() {
                     if (b == null) {
                         Text(title, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp, maxLines = 1)
                         Text(
-                            provider.text(if (busy) s.gettingBarcode else s.noBarcode),
+                            provider.text(if (busy) s.gettingBarcode else if (nothing) s.noOrders else s.noBarcode),
                             style = MaterialTheme.typography.titleMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -492,7 +500,7 @@ class MainActivity : BaseActivity() {
                 }
                 // When it was updated, whether the last refresh failed, whether the watch has it.
                 val failed = error.takeIf { !busy && !demo && loggedIn }
-                if (b != null || failed != null) {
+                if (b != null || failed != null || nothing) {
                     FlowRow(
                         Modifier.padding(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -508,7 +516,7 @@ class MainActivity : BaseActivity() {
                                 if (stale) colors.errorContainer else colors.surfaceContainerHighest,
                                 if (stale) colors.onErrorContainer else colors.onSurfaceVariant,
                             )
-                        }
+                        } else if (nothing) CardTag(R.drawable.ic_schedule, s.checkedWhen(s.receivedWhen(emptyAt, now)), colors.surfaceContainerHighest, colors.onSurfaceVariant)
                         if (watchEnabled && b != null) WatchTag(account, b, onWatch)
                         if (failed != null) CardTag(R.drawable.ic_cloud_off, s.refreshFailed, colors.errorContainer, colors.onErrorContainer) { errorShown = true }
                     }
@@ -525,7 +533,8 @@ class MainActivity : BaseActivity() {
                         dismissButton = { TextButton(onClick = { errorShown = false }) { Text(s.ok) } },
                     )
                 }
-                if (loggedIn || demo) {
+                // CDEK: the cabinet does not keep our login (it asks for the phone and a captcha again).
+                if ((loggedIn || demo) && provider != Provider.CDEK) {
                     PillButton(
                         provider.text(s.myOrders), R.drawable.ic_shopping_bag,
                         {
