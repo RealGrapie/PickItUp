@@ -41,7 +41,10 @@ object CdekClient : ProviderClient {
         .let { Base64.encodeToString(it, Base64.URL_SAFE or Base64.NO_PADDING or Base64.NO_WRAP) }
 
     /** A fresh PKCE login: the verifier and state wait in the account's prefs for the redirect. */
-    override fun loginUrl(account: Account): String {
+    override fun loginUrl(account: Account): String = loginUrl(account, silent = false)
+
+    /** [silent]: `prompt=none`, answered from the SSO session without any page (step 2 of the login). */
+    fun loginUrl(account: Account, silent: Boolean): String {
         val verifier = random(48)
         val state = random(16)
         prefs(account).edit().putString(KEY_VERIFIER, verifier).putString(KEY_STATE, state).apply()
@@ -58,6 +61,7 @@ object CdekClient : ProviderClient {
             .appendQueryParameter("code_challenge", challenge)
             .appendQueryParameter("code_challenge_method", "S256")
             .appendQueryParameter("state", state)
+            .apply { if (silent) appendQueryParameter("prompt", "none") }
             .build().toString()
     }
 
@@ -196,6 +200,12 @@ object CdekClient : ProviderClient {
             0 to (e.message ?: e.javaClass.simpleName)
         }
     }
+
+    /** Names of the SSO cookies in the account's profile (debug: is the CDEK site session there?). */
+    fun ssoCookieNames(account: Account): String =
+        WebProfiles.cookies(account.profile).getCookie("https://sso.cdek.ru/auth/realms/b2c/")
+            ?.split(';')?.map { it.trim().substringBefore('=') }?.filter { it.startsWith("KEYCLOAK") }?.sorted()
+            ?.joinToString(",")?.ifEmpty { null } ?: "none"
 
     private fun forget(account: Account) {
         prefs(account).edit().remove(KEY_REFRESH).remove(KEY_REFRESH_UNTIL).remove(KEY_ACCESS).remove(KEY_ACCESS_UNTIL).apply()

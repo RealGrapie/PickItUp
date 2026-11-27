@@ -199,13 +199,32 @@ class LoginActivity : ComponentActivity() {
         loggedIn()
     }
 
+    /**
+     * CDEK login in two steps. 1: the user logs in; that redirect's code is left to the site (it logs
+     * the cabinet in, and the redirect sets the SSO cookies). Taking it ourselves broke the cabinet:
+     * the site then tried the used code too and CDEK ended the session. 2: a silent request
+     * (`prompt=none`, the SSO cookies answer it) gives a second code that only we see.
+     */
+    private var cdekSilent = false
+
+    private fun cdekSecondStep() {
+        if (finishing || cdekSilent) return
+        cdekSilent = true
+        WebProfiles.cookies(account.profile).flush()
+        DebugLog.d("site", "CDEK step 2 (silent); SSO cookies: ${CdekClient.ssoCookieNames(account)}")
+        web.loadUrl(CdekClient.loginUrl(account, silent = true))
+    }
+
     private fun finishCdekLogin(url: Uri) {
         finishing = true
         DebugLog.d("site", "CDEK login redirect, exchanging the code")
         lifecycleScope.launch {
-            if (CdekClient.finishLogin(account, url)) loggedIn()
-            else {
+            if (CdekClient.finishLogin(account, url)) {
+                WebProfiles.cookies(account.profile).flush()
+                loggedIn()
+            } else {
                 finishing = false
+                cdekSilent = false
                 Toast.makeText(this@LoginActivity, AppSettings.strings().cdekLoginFailed, Toast.LENGTH_LONG).show()
                 web.loadUrl(CdekClient.loginUrl(account))
             }
@@ -241,11 +260,23 @@ class LoginActivity : ComponentActivity() {
             // and the cookie watcher closes the window.
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
-                // CDEK: our PKCE login came back. Not cancelled: that dropped the SSO session cookies
-                // the redirect sets (the cabinet then asked to log in again). The page loads, we take the code.
                 if (loginMode && cdek && !finishing && CdekClient.isLoginRedirect(account, url)) {
+                    if (!cdekSilent) {
+                        // Step 1 came back: the site gets this page and code (see cdekSilent).
+                        DebugLog.d("site", "CDEK step 1 done, the site logs in")
+                        handler.postDelayed(::cdekSecondStep, 6000)  // if its page never finishes
+                        return false
+                    }
+                    // Step 2: ours alone; the site never sees this code.
                     finishCdekLogin(url)
-                    return false
+                    return true
+                }
+                // Step 2 refused (no SSO session after all): back to the normal login.
+                if (loginMode && cdek && cdekSilent && !finishing && url.toString().startsWith(CdekClient.REDIRECT) && url.getQueryParameter("error") != null) {
+                    DebugLog.d("site", "CDEK silent login refused: ${url.getQueryParameter("error")}")
+                    cdekSilent = false
+                    view.loadUrl(CdekClient.loginUrl(account))
+                    return true
                 }
                 if (url.scheme == "http" || url.scheme == "https") return false
                 openExternally(url.toString())
@@ -253,11 +284,8 @@ class LoginActivity : ComponentActivity() {
             }
 
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): android.webkit.WebResourceResponse? {
-                // CDEK login: the site's own code exchange is refused, so our one-time code stays ours.
-                if (loginMode && cdek && request.method == "POST" && request.url.path.orEmpty().endsWith("/openid-connect/token")) {
-                    DebugLog.d("site", "CDEK site token request blocked during our login")
-                    return android.webkit.WebResourceResponse("application/json", "utf-8", 403, "Forbidden", emptyMap(), "{}".byteInputStream())
-                }
+                if (cdek && request.url.host == "sso.cdek.ru" && request.url.path.orEmpty().contains("/protocol/"))
+                    DebugLog.d("site", "CDEK SSO ${request.method} ${request.url.path}${if (request.isForMainFrame) " (document)" else ""}")
                 if (request.url.host == "www.ozon.ru" && (request.isForMainFrame || request.url.path.orEmpty().startsWith("/api/")))
                     DebugLog.d("site", "${request.method} ${DebugLog.url(request.url.toString())}${if (request.isForMainFrame) " (document)" else ""}")
                 return null
@@ -297,6 +325,9 @@ class LoginActivity : ComponentActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 // A rotated pair from this document load goes to disk at once (swipe from Recents kills us).
                 WebProfiles.cookies(account.profile).flush()
+                // Step 1's site page is in: give the site a moment to log itself in, then step 2.
+                if (loginMode && cdek && !cdekSilent && !finishing && Uri.parse(url).host == "my.cdek.ru")
+                    handler.postDelayed(::cdekSecondStep, 2500)
                 if (loginMode) checkLoggedIn()
             }
 
@@ -318,6 +349,7 @@ class LoginActivity : ComponentActivity() {
         }
         DebugLog.d("site", "opened for account $account, ${if (loginMode) "login" else "page " + DebugLog.url(pageUrl)}")
         if (ozon) DebugLog.tokens("site", "tokens at open", account)
+        if (cdek) DebugLog.d("site", "CDEK SSO cookies at open: ${CdekClient.ssoCookieNames(account)}")
         if (loginMode) {
             wasGuest = !account.provider.client.isLoggedIn(account)
             startToken = if (ozon) OzonClient.accessToken(account) else if (wb) WbClient.token(account) else null

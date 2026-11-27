@@ -216,11 +216,12 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   refresh token (1 year, rotated on every use) in the account's prefs. Fetch = refresh -> 5-min access ->
   `GET my.cdek.ru/api/lkfl/v2/pickupCodes/all`. `{"data":null}` = `FetchResult.Empty`: code cleared,
   `Account.emptyAt`, card "Нет заказов к получению", watch gets an empty Code + Status "Nothing to pick up".
-  A real `pickupCodeInfo.barCode` (Code 128) was not seen live yet. The redirect must NOT be cancelled
-  in `shouldOverrideUrlLoading` (its response sets the SSO cookies `KEYCLOAK_IDENTITY`/`_SESSION`;
-  cancelled = "My orders" asked to log in again): it loads, we take the code from the URL, and the
-  site's own `/openid-connect/token` POSTs are refused during our login. `shouldInterceptRequest` is not
-  called for redirect targets, so blanking the page there does not work.
+  A real `pickupCodeInfo.barCode` (Code 128) was not seen live yet. Login = two steps (for "My orders"):
+  1. the user's login; its redirect is NOT ours: it loads and the site logs itself in (cancelling it
+  dropped the SSO cookies; exchanging its code ourselves made the site try the used code too and
+  CDEK ended the session); 2. a silent `prompt=none` request (SSO cookies) whose redirect only we
+  see (cancelled, code exchanged). `error=` on step 2 -> back to step 1. `shouldInterceptRequest`
+  is not called for redirect targets, so blanking a page there does not work.
 - Refresh errors: `Account.lastError` (persisted) -> red "Не удалось обновить" tag on the code card
   (tap = message + retry) and the chip's red dot; cleared by the next Ok / LoginNeeded.
 - Login tokens rotate (Reqable capture, 2026-11-01): `__Secure-access-token` lives 2 h
