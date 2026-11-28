@@ -8,7 +8,7 @@ to the watch.
 
 ```
 watch/src/c/   Pebble C watchapp (SDK 4.44)
-  main.c       UI (barcode / rotated / QR test view, setup screens), AppMessage, persist, timers
+  main.c       UI (barcode / QR test view, setup screens), AppMessage, persist, timers
   code128.c    Code 128 encoder (set B/C switching)
   qr.c         QR encoder: byte mode, level M v1-2 (26 bytes), level L v1-5 (106 bytes)
 android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2 (io.rebble.pebblekit2)
@@ -123,12 +123,10 @@ android/       Kotlin/Compose companion, package com.grapie.pickitup, PebbleKit2
   "offline, " without the phone); a pending "Updating..." becomes "Phone offline" / "No answer from
   phone" instead of hanging.
 - **Watch views** share one `Layout` (header "OZON pickup code", content, code text, footer):
-  barcode and QR upright; the rotated view is the same layout on a landscape frame turned 90 deg
-  (header at the button side). Pebble can't rotate text, so `draw_rotated` draws each line upright in
-  a scratch strip mid-screen, copies it out of the frame buffer as 1 bit/px and writes it back
-  rotated (handles 1-bit, 8-bit and round 8-bit-circular buffers). All views decode on all 7 platforms.
-- **Watch buttons**: SELECT cycles barcode -> QR (test; Ozon scans Code 128) -> rotated barcode
-  (order via a `next[]` table; the persisted enum values are unchanged),
+  barcode and QR. Both decode on all 7 platforms. The rotated (landscape) barcode was removed in
+  watch 1.6.2: its frame-buffer text rotation made the account slide stutter (user's call).
+  The persisted mode 1 (old rotated) now opens as the barcode.
+- **Watch buttons**: SELECT toggles barcode <-> QR (test; Ozon scans Code 128),
   long SELECT (0.6 s) opens the companion QR any time and only BACK closes it (SELECT does nothing
   there; BACK elsewhere exits the app), UP / DOWN show the previous / next account with a slide (the code leaves up or down, the other comes in; several accounts; else they only reset the
   auto-exit timer). View mode persists. The backlight is left to the system (user's choice).

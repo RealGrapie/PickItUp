@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/watch.png" alt="The watchapp on Pebble 2 Duo, Pebble Time (QR view), Time Round, Time 2 (rotated view), Round 2 and the original Pebble">
+  <img src="docs/screenshots/watch.png" alt="The watchapp on Pebble 2 Duo, Pebble Time (QR view), Time Round, Time 2, Round 2 and the original Pebble">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
   without a phone connection. One build for every Pebble: Pebble, Pebble Steel, Pebble Time,
   Time Steel, Time Round, Pebble 2, Pebble 2 Duo, Pebble Time 2, Pebble Round 2.
 
-Watch buttons: SELECT — barcode / QR / rotated barcode, hold SELECT — link to the phone app
+Watch buttons: SELECT — barcode / QR, hold SELECT — link to the phone app
 (BACK closes it), UP — refresh. The footer shows when the code was updated ("upd today 14:05",
 or "outdated").
 

@@ -7,7 +7,7 @@
 // code; the watch keeps it in persistent storage so it can be shown at the pickup point without a
 // phone link. Day codes come with the next days too, and the watch moves on at midnight by itself.
 //
-// Buttons: SELECT - cycle barcode / QR code (test) / rotated barcode (more quiet zone),
+// Buttons: SELECT - barcode / QR code (test),
 // long SELECT - setup screen with a QR link to the phone app (BACK closes it), UP / DOWN - previous /
 // next account (several accounts; the phone re-fetches stale codes by itself). The backlight is left to the system. The app closes itself after a timeout
 // without button presses (set in the phone companion), except on setup screens.
@@ -86,6 +86,7 @@ static uint32_t pkey(int i, int field) {
 static Window *s_menu_window;
 static MenuLayer *s_menu;
 
+// MODE_VERTICAL was the rotated barcode (dropped in 1.6: too slow to slide); kept for the persisted values.
 typedef enum { MODE_BARS, MODE_VERTICAL, MODE_QR, MODE_COUNT } ViewMode;
 static ViewMode s_mode;
 static int s_timeout_s = DEFAULT_TIMEOUT_S;
@@ -169,7 +170,7 @@ static void load_state(void) {
   s_cur = persist_read_int(PERSIST_CURRENT);
   if (s_cur < 0 || s_cur >= s_count) s_cur = 0;
   if (persist_exists(PERSIST_TIMEOUT)) s_timeout_s = persist_read_int(PERSIST_TIMEOUT);
-  s_mode = persist_read_int(PERSIST_MODE) % MODE_COUNT;  // 0 (barcode) when not stored yet
+  s_mode = persist_read_int(PERSIST_MODE) == MODE_QR ? MODE_QR : MODE_BARS;  // barcode when not stored yet
 #ifdef DEMO
   s_timeout_s = 0;  // emulator demos stay open
   if (!s_acc[0].code[0]) {
@@ -211,14 +212,14 @@ __attribute__((unused)) static int isqrt(int v) {
   return r;
 }
 
-// Room for the code along its direction. Round screens: the chord at the band edge farthest from
+// Room for the code across the screen. Round screens: the chord at the band edge farthest from
 // the centre, so the code and its quiet zones stay inside the circle on every bar line.
-static int bars_length(GRect area, bool vertical, GRect screen) {
-  int length = vertical ? area.size.h : area.size.w;
+static int bars_length(GRect area, GRect screen) {
+  int length = area.size.w;
 #ifdef PBL_ROUND
   int r = screen.size.w / 2;
-  int from = vertical ? area.origin.x : area.origin.y;
-  int to = from + (vertical ? area.size.w : area.size.h);
+  int from = area.origin.y;
+  int to = from + area.size.h;
   int d = from - r < 0 ? r - from : from - r;
   if (to - r > d) d = to - r;
   if (r - to > d) d = r - to;
@@ -233,8 +234,8 @@ static int bars_length(GRect area, bool vertical, GRect screen) {
 // 2px needs ~300px, more than any Pebble has, so the code is made longer instead (as Member Card
 // does): the fewest digit pairs in set C whose code still fits, i.e. as wide as the room allows.
 // Time 2 and Round 2 get a wider code; 144px screens and Time Round keep the dense one.
-static void draw_bars(GContext *ctx, GRect area, bool vertical, GRect screen) {
-  int room = bars_length(area, vertical, screen) - 2 * MARGIN;
+static void draw_bars(GContext *ctx, GRect area, GRect screen) {
+  int room = bars_length(area, screen) - 2 * MARGIN;
   const uint8_t *widths = s_widths;
   int n = s_nwidths, modules = s_modules;
   if (s_modules < room) {
@@ -247,17 +248,14 @@ static void draw_bars(GContext *ctx, GRect area, bool vertical, GRect screen) {
       }
     }
   }
-  int length = vertical ? area.size.h : area.size.w;
+  int length = area.size.w;
   int scale = room / modules;
   if (scale < 1) scale = 1;
   int pos = (length - modules * scale) / 2;
   for (int i = 0; i < n; i++) {
     int w = widths[i] * scale;
     if (i % 2 == 0) {
-      GRect bar = vertical
-          ? GRect(area.origin.x, area.origin.y + pos, area.size.w, w)
-          : GRect(area.origin.x + pos, area.origin.y, w, area.size.h);
-      graphics_fill_rect(ctx, bar, 0, GCornerNone);
+      graphics_fill_rect(ctx, GRect(area.origin.x + pos, area.origin.y, w, area.size.h), 0, GCornerNone);
     }
     pos += w;
   }
@@ -339,8 +337,7 @@ static void draw_setup(GContext *ctx, GRect b) {
 #endif
 }
 
-// Where things go on the barcode screens. All three views share it: the plain barcode and the QR
-// use it as is; the rotated barcode lays it out on a landscape frame and turns it by 90 degrees.
+// Where things go on the barcode screens (the barcode and the QR view share it).
 typedef struct {
   GRect header, title, content, code, footer;
 } Layout;
@@ -420,119 +417,6 @@ static void draw_frame_texts(GContext *ctx, const Layout *l, bool big) {
   draw_text(ctx, foot, foot_font(big), l->footer);
 }
 
-// ---- Rotated view. Pebble has no rotated text, so each line is drawn upright in a scratch strip
-// of the frame buffer, copied out as 1 bit per pixel ("is text"), and written back turned by
-// 90 degrees once the rest is drawn. Landscape (x, y) -> screen (W - 1 - y, x): the landscape top
-// is at the screen's right edge (the button side), read with the watch turned counter-clockwise.
-
-typedef struct {
-  uint8_t *bits;  // w*h bits, 1 = text pixel
-  int w, h;
-  GRect dst;      // where the strip goes, in landscape coordinates
-  GColor fg;
-} TextStrip;
-
-static GRect rotate_rect(GRect r, GRect screen) {
-  return GRect(screen.size.w - r.origin.y - r.size.h, r.origin.x, r.size.h, r.size.w);
-}
-
-static bool fb_get(GBitmap *fb, int x, int y, uint8_t bg8) {
-  if (y < 0 || y >= gbitmap_get_bounds(fb).size.h) return false;
-  GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, y);
-  if (x < row.min_x || x > row.max_x) return false;
-  if (gbitmap_get_format(fb) == GBitmapFormat1Bit) return !((row.data[x / 8] >> (x % 8)) & 1);  // black text
-  return row.data[x] != bg8;
-}
-
-static void fb_set(GBitmap *fb, int x, int y, GColor c) {
-  GRect bounds = gbitmap_get_bounds(fb);
-  if (y < 0 || y >= bounds.size.h) return;
-  GBitmapDataRowInfo row = gbitmap_get_data_row_info(fb, y);
-  if (x < row.min_x || x > row.max_x) return;
-  if (gbitmap_get_format(fb) == GBitmapFormat1Bit) {
-    uint8_t mask = 1 << (x % 8);
-    if (gcolor_equal(c, GColorBlack)) row.data[x / 8] &= ~mask; else row.data[x / 8] |= mask;
-  } else {
-    row.data[x] = c.argb;
-  }
-}
-
-// Renders [text] upright into a scratch strip in the middle of the screen (full-width rows even
-// on round screens) and keeps its pixels. The strip is as wide as the screen allows.
-// [off] = where the layer is on the screen (it slides while the account changes): the frame
-// buffer is the whole screen, the drawing is in layer coordinates.
-static void render_strip(GContext *ctx, GRect screen, GPoint off, TextStrip *s, const char *text, const char *font,
-                         GRect dst, GColor bg, GColor fg) {
-  s->w = dst.size.w < screen.size.w ? dst.size.w : screen.size.w;
-  s->h = dst.size.h;
-  s->fg = fg;
-  // Centre the strip in its landscape box.
-  s->dst = GRect(dst.origin.x + (dst.size.w - s->w) / 2, dst.origin.y, s->w, s->h);
-  s->bits = calloc((s->w * s->h + 7) / 8, 1);
-  if (!s->bits) return;
-  // In the middle of the part of the layer that is on the screen.
-  int top = off.y < 0 ? -off.y : 0, bottom = off.y > 0 ? screen.size.h - off.y : screen.size.h;
-  GRect scratch = GRect((screen.size.w - s->w) / 2, (top + bottom - s->h) / 2, s->w, s->h);
-  graphics_context_set_fill_color(ctx, bg);
-  graphics_fill_rect(ctx, scratch, 0, GCornerNone);
-  graphics_context_set_text_color(ctx, fg);
-  draw_text(ctx, text, font, scratch);
-  GBitmap *fb = graphics_capture_frame_buffer(ctx);
-  if (!fb) return;
-  uint8_t bg8 = bg.argb;
-  for (int y = 0; y < s->h; y++) {
-    for (int x = 0; x < s->w; x++) {
-      if (fb_get(fb, off.x + scratch.origin.x + x, off.y + scratch.origin.y + y, bg8)) {
-        int i = y * s->w + x;
-        s->bits[i / 8] |= 1 << (i % 8);
-      }
-    }
-  }
-  graphics_release_frame_buffer(ctx, fb);
-}
-
-static void blit_strip(GBitmap *fb, GRect screen, GPoint off, TextStrip *s) {
-  if (!s->bits) return;
-  for (int y = 0; y < s->h; y++) {
-    for (int x = 0; x < s->w; x++) {
-      int i = y * s->w + x;
-      if (s->bits[i / 8] & (1 << (i % 8))) {
-        int lx = s->dst.origin.x + x, ly = s->dst.origin.y + y;
-        fb_set(fb, off.x + screen.size.w - 1 - ly, off.y + lx, s->fg);
-      }
-    }
-  }
-  free(s->bits);
-  s->bits = NULL;
-}
-
-static void draw_rotated(GContext *ctx, GRect b, GPoint off) {
-  GRect land = GRect(0, 0, b.size.h, b.size.w);
-  Layout l = layout_for(land);
-  bool big = land.size.w >= 200 || land.size.h >= 200;
-  char foot[48];
-  footer_text(foot, sizeof(foot));
-
-  TextStrip strips[3];
-  render_strip(ctx, b, off, &strips[0], header_text(), title_font(big), l.title, header_bg(), header_fg());
-  render_strip(ctx, b, off, &strips[1], s_visible[0] ? s_visible : s_code, code_font(big), l.code, GColorWhite, GColorBlack);
-  render_strip(ctx, b, off, &strips[2], foot, foot_font(big), l.footer, GColorWhite, GColorBlack);
-
-  graphics_context_set_fill_color(ctx, GColorWhite);
-  graphics_fill_rect(ctx, b, 0, GCornerNone);
-  graphics_context_set_fill_color(ctx, header_bg());
-  graphics_fill_rect(ctx, rotate_rect(l.header, b), 0, GCornerNone);
-  graphics_context_set_fill_color(ctx, GColorBlack);
-  draw_bars(ctx, rotate_rect(l.content, b), true, b);
-
-  GBitmap *fb = graphics_capture_frame_buffer(ctx);
-  for (int i = 0; i < 3; i++) {
-    if (fb) blit_strip(fb, b, off, &strips[i]);
-    else if (strips[i].bits) { free(strips[i].bits); strips[i].bits = NULL; }
-  }
-  if (fb) graphics_release_frame_buffer(ctx, fb);
-}
-
 static void canvas_update(Layer *layer, GContext *ctx) {
   GRect b = layer_get_bounds(layer);
   graphics_context_set_fill_color(ctx, GColorWhite);
@@ -546,11 +430,6 @@ static void canvas_update(Layer *layer, GContext *ctx) {
   }
   // Wildberries scans a QR: the barcode views would only show a code nobody reads.
   ViewMode mode = s_format == FORMAT_QR ? MODE_QR : s_mode;
-  if (mode == MODE_VERTICAL) {
-    draw_rotated(ctx, b, layer_get_frame(layer).origin);
-    return;
-  }
-
   // The module width stays 1px everywhere: 2px would need ~300px for a typical code.
   bool big = b.size.w >= 200;
   Layout l = layout_for(b);
@@ -562,7 +441,7 @@ static void canvas_update(Layer *layer, GContext *ctx) {
     draw_qr(ctx, &s_qr, l.content, 1);  // as big as the band allows: 4px modules on 144x168
 #endif
   } else {
-    draw_bars(ctx, l.content, false, b);
+    draw_bars(ctx, l.content, b);
   }
 }
 
@@ -757,10 +636,7 @@ static void select_click(ClickRecognizerRef recognizer, void *context) {
   if (s_show_setup) {
     // The companion QR is left with BACK only.
   } else if (s_nwidths && s_format != FORMAT_QR) {
-    // Order on screen: barcode -> QR -> rotated (enum values stay as persisted before).
-    static const ViewMode next[MODE_COUNT] = { [MODE_BARS] = MODE_QR, [MODE_QR] = MODE_VERTICAL,
-                                               [MODE_VERTICAL] = MODE_BARS };
-    s_mode = next[s_mode];
+    s_mode = s_mode == MODE_QR ? MODE_BARS : MODE_QR;
     persist_write_int(PERSIST_MODE, s_mode);
   }
   restart_exit_timer();

@@ -1,7 +1,7 @@
 """Drive every Pebble emulator and decode screenshots with zxing.
 
 Usage (Windows, ozvenv python): test_emulators.py <watch dir> <out dir> <platforms,comma> demo|setup
-  demo  - DEMO build: barcode, rotated barcode, QR test view must decode on each platform
+  demo  - DEMO build: barcode and QR test view must decode on each platform
   setup - normal build: the first-run "Get the phone app" QR must decode
 """
 import os
@@ -63,7 +63,7 @@ def run(demo):
                 im, res = shot(p, f"{p}_0")
                 tries += 1
             out = [res]
-            for i in (1, 2):
+            for i in (1,):
                 press(p)
                 im, r = shot(p, f"{p}_{i}")
                 out.append(r)

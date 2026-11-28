@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/watch.png" alt="Watchapp на Pebble 2 Duo, Pebble Time (QR), Time Round, Time 2 (повёрнутый штрихкод), Round 2 и первом Pebble">
+  <img src="docs/screenshots/watch.png" alt="Watchapp на Pebble 2 Duo, Pebble Time (QR), Time Round, Time 2, Round 2 и первом Pebble">
 </p>
 
 <p align="center">
@@ -35,7 +35,7 @@
   связи с телефоном. Одна сборка для всех Pebble: Pebble, Pebble Steel, Pebble Time,
   Time Steel, Time Round, Pebble 2, Pebble 2 Duo, Pebble Time 2, Pebble Round 2.
 
-Кнопки часов: SELECT — штрихкод / QR / повёрнутый штрихкод, долгое нажатие SELECT — ссылка на
+Кнопки часов: SELECT — штрихкод / QR, долгое нажатие SELECT — ссылка на
 приложение для телефона (закрывается кнопкой BACK), UP — обновить код. Внизу экрана видно, когда
 код обновлялся ("upd today 14:05"
 или "outdated").
